@@ -25,7 +25,10 @@
         (xitomatl srfi and-let*)
         (spells receive)
         (only (spells lists) split-at)
-        (only (spells strings) string-concatenate)
+        (only (spells strings)
+              string-concatenate
+              string-concatenate-reverse
+              string-fold)
         (spells alist)
         (spells string-substitute)
         (spells format)
@@ -73,23 +76,34 @@
       (cadr override)
       (msum (map char->integer (string->list name))))))
 
+(define (match-extract convert name)
+  (lambda (match)
+    (convert (irregex-match-substring match name))))
+
 (define link-re (irregex "\\b[a-z]+://[^\\s<>]+"))
 
 (define (link-string str) ; str -> str
-  (irregex-replace/all link-re str "<a href=\"" 0 "\">" 0 "</a>"))
-
-(define (add-to-list char l) ; char (char ...) -> (char ...)
-  (cond ((equal? char #\<) (cons #\; (cons #\t (cons #\l (cons #\& l)))))
-        ((equal? char #\>) (cons #\; (cons #\t (cons #\g (cons #\& l)))))
-        ((equal? char #\&) (cons #\; (cons #\p (cons #\m (cons #\a (cons #\& l))))))
-        (#t (cons char l))))
+  (irregex-replace/all link-re str
+                       "<a href=\"" (match-extract html-escape 0) "\">"
+                       (match-extract html-escape 0)
+                       "</a>"))
 
 (define (html-escape str) ; str -> str
-  (let iter ((out '()) (in (string->list str)))
-    (if (null? in)
-      (list->string (reverse out))
-      (iter (add-to-list (car in) out) (cdr in)))))
+  (str-escape (lambda (c)
+                (case c
+                  ((#\<) "&lt;")
+                  ((#\>) "&gt;")
+                  ((#\&) "&amp;")
+                  ((#\") "&quot;")
+                  (else (string c))))
+              str))
 
+(define (str-escape escaper str)
+  (string-concatenate-reverse
+   (string-fold (lambda (c parts)
+                  (cons (escaper c) parts))
+                '()
+                str)))
 (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
 
 (define log-templates
@@ -101,27 +115,36 @@
          " " (submatch-named type (+ (~ white))) " "
          (submatch-named nick ,ident-sre) (? (or ":" ">"))
          (submatch-named line (* any)))
-      ,(lambda (hours minutes type nick line)
-         (string-append
-          "<li class=\"n" (number->string (modulo (word->integer nick) 26)) "\"> "
-          "<span class=\"time\">" hours ":" minutes "</span> "
-          (if (equal? type "<") "&lt;<b>" "* <b>")
-          nick
-          (if (equal? type "<") "</b>&gt;" "</b>")
-          (html-escape line)
-          "</li>\n"))
-      (hours minutes type nick line)))))
+      ,log-line->html (hours minutes #f type nick line))
+     ((: (submatch-named hours (** 1 2 digit)) ":" (submatch-named minutes (** 1 2 digit))
+         ":" (submatch-named seconds (** 1 2 digit))
+         " " (submatch-named type (or "<" "*"))
+         (submatch-named nick ,ident-sre) ">"
+         (submatch-named line (* any)))
+      ,log-line->html (hours minutes seconds type nick line)))))
+
+(define (log-line->html hours minutes seconds type nick line)
+  (string-append
+   "<li class=\"n" (number->string (modulo (word->integer nick) 26)) "\"> "
+   "<span class=\"time\">" hours ":" minutes "</span> "
+   (if (equal? type "<") "&lt;<b>" "* <b>")
+   nick
+   (if (equal? type "<") "</b>&gt;" "</b>")
+   (html-escape line)
+   "</li>\n"))
 
 (define (color-line str) ; str -> str
   (define (submatches match names)
     (map (lambda (name)
-           (irregex-match-substring match name))
+           (if (or (symbol? name) (integer? name))
+               (irregex-match-substring match name)
+               name))
          names))
   (or (or-map (lambda (irx/tmpl)
                 (and-let* ((match (irregex-match (car irx/tmpl) str)))
                   (apply (cadr irx/tmpl) (submatches match (caddr irx/tmpl)))))
               log-templates)
-      (string-append "<li class=\"meta\"><em>" (html-escape str) "</em></li>")))
+      (string-append "<li class=\"meta\"><em>" (html-escape str) "</em></li>\n")))
 
 
 ;;   (let ((lline (string->list str)))
