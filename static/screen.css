@@ -1,0 +1,24 @@
+body { 
+    background: #fff; 
+    color: #000; 
+}
+a:link,a:visited,a:active { 
+    background: #0ff; 
+    color: #006; 
+}
+#foot {
+    font-size: x-small; 
+}
+table.channels { 
+    border-width: thin;
+    border-style: dashed; 
+}
+table.channels th {
+    border-width: thin;
+    border-style: dashed; 
+}
+table.channels td {
+    border-width: thin;
+    border-style: dashed; 
+}
+.meta { color: #999 }

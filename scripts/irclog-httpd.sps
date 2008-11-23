@@ -22,13 +22,17 @@
 ;;; Code:
 
 #!r6rs
-(import (rnrs)
+(import (except (rnrs) delete-file file-exists?)
         (rnrs r5rs)
+        (xitomatl srfi and-let*)
         (spells receive)
         (spells parameter)
+        (spells alist)
         (only (spells strings) string-join)
+        (only (spells lists) unfold drop)
         (spells string-substitute)
         (spells pathname)
+        (spells filesys)
         (spells tracing)
         (sxml simple)
         (sbank soup)
@@ -47,32 +51,62 @@
          soup-))
 
 (define (main argv)
-  (let ((default-port 8001))
-    (receive (log-dir port)
-             (case (length argv)
-               ((1) (values "." default-port))
-               ((2) (values (cadr argv) default-port))
-               ((3) (values (cadr argv) (string->number (caddr argv))))
-               (else
-                (bail-out "usage: irclog-httpd.sps [directory [port]]")))
-      (irclog-httpd (make-irclogs `((log-dir ,log-dir))) port))))
+  (let ((config
+         (case (length argv)
+           ((1) (default-config))
+           ((2) (merge-config (default-config) (read-config (cadr argv))))
+           (else
+            (bail-out "usage: irclog-httpd.sps [config-file]")))))
+    (irclog-httpd config)))
 
-(define (irclog-httpd irclogs port)
+(define (default-config)
+  '((port 8001)
+    (static-files "./static")
+    (irclogs
+     (log-dir ".")
+     (state-dir "./.irclogs-state"))))
+
+(define (merge-config config new-values)
+  (let loop ((result config) (vals new-values))
+    (if (null? vals)
+        result
+        (cond ((assq (caar vals) config)
+               => (lambda (old-entry)
+                    (loop (cons (car vals) (filter (lambda (e)
+                                                     (not (eq? e old-entry)))
+                                                   result))
+                          (cdr vals))))
+              (else
+               (loop (cons (car vals) result)
+                     (cdr vals)))))))
+
+(define (read-config filename)
+  (call-with-input-file (x->namestring filename)
+    (lambda (port)
+      (unfold eof-object? values (lambda (x) (read port)) (read port)))))
+
+(define (irclog-httpd config)
   (g-thread-init #f)
-  (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
-    (let ((server (send <soup-server> (new/props 'port port
-                                                 'server-header "simple-httpd"))))
-      (unless server
-        (bail-out "Unable to bind to server port {0}\n" port))
-      (irclogs 'update-state)
-      (send server
-        (add-handler #f (irclogs-handler irclogs))
-        (run-async))
-      (println "Waiting for requests...")
-      (g-main-loop-run (g-main-loop-new #f #t)))))
+  (let ((port (car (assq-ref config 'port))))
+    (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
+      (let ((server (send <soup-server> (new/props 'port port
+                                                   'server-header "irclog-httpd")))
+            (irclogs (make-irclogs (assq-ref config 'irclogs))))
+        (unless server
+          (bail-out "Unable to bind to server port {0}\n" port))
+        (irclogs 'update-state)
+        (send server
+          (add-handler #f (wrap-handler (irclogs-handler irclogs)))
+          (add-handler "/static/" (wrap-handler
+                                   (static-file-handler
+                                    (pathname-as-directory (car (assq-ref config 'static-files)))
+                                    1)))
+          (run-async))
+        (println "Waiting for requests...")
+        (g-main-loop-run (g-main-loop-new #f #t))))))
 
-;; Note that `user-data' will go away when I get around to implement hiding it
-(define (irclogs-handler irclogs)
+(define (wrap-handler handler)
+  ;; Note that `user-data' will go away when I get around to implement hiding it
   (lambda (server msg path query client user-data)
     (let ((method (send msg (get 'method))))
       (println "{0} {1} HTTP/1.{2}" method  path (send msg (get 'http-version)))
@@ -82,35 +116,92 @@
       (let ((body (send msg (get-request-body))))
         (when (> (send body (get-length)) 0)
           (println (send body (get-data)))))
-      (cond ((member method '("GET" "HEAD"))
-             (do-get irclogs (string->symbol (string-downcase method)) msg path query))
-            (else
-             (send msg (set-status (soup-status 'not-implemented)))))
+      (handler (string->symbol (string-downcase method)) msg path query)
       (println " -> {0} {1}" (send msg (get 'status-code)) (send msg (get 'reason-phrase))))))
 
-(define (do-get irclogs method msg path query)
-  (define (handle-page code title message . args)
-    (let ((content (xhtml-page title (if (procedure? message)
-                                         (apply message args)
-                                         (apply irclogs message args)))))
-      (case method
-        ((head)
-         (send (send msg (get-response-headers))
-           (append "Content-Length" (number->string (bytevector-length content)))))
-        (else
-         (send msg (set-response "text/html" 'copy content)))))
-    (send msg (set-status (soup-status code))))
-  (let ((pathname (x->pathname path)))
-    (cond ((pathname=? pathname (make-pathname '/ '() #f))
-           (handle-page 'ok "IRC activity overview" 'render-overview/html))
-          ((pathname-file pathname)
-           (let ((uri (send (send msg (get-uri)) (to-string #f))))
-             (send (send msg (get-response-headers))
-               (append "Location" (string-append uri "/")))
-             (send msg (set-status (soup-status 'moved-permanently)))))
+(define (handle-get/head method msg code renderer)
+  (if (memq method '(get head))
+      (receive (content-type content) (renderer)
+        (case method
+          ((head)
+           (add-response-headers!
+            msg
+            "Content-Length" (number->string (bytevector-length content))))
           (else
-           (handle-page 'not-found "Page not found" render-error-page 'not-found)
-           (send msg (set-status (soup-status 'not-found)))))))
+           (send msg (set-response content-type 'copy content))))
+        (send msg (set-status (soup-status code))))
+      (send msg (set-status (soup-status 'not-implemented)))))
+
+(define (irclogs-handler irclogs)
+  (lambda (method msg path query)
+    (define (handle-page code title message . args)
+      (handle-get/head
+       method msg code
+       (lambda ()
+         (values "text/html"
+                 (string->utf8
+                  (xhtml-page title (if (procedure? message)
+                                        (apply message args)
+                                        (apply irclogs message args))))))))
+    (let ((pathname (x->pathname path)))
+      (cond ((pathname=? pathname (make-pathname '/ '() #f))
+             (handle-page 'ok "IRC activity overview" 'render-overview/html))
+            ((pathname-file pathname)
+             (let ((uri (send (send msg (get-uri)) (to-string #f))))
+               (send (send msg (get-response-headers))
+                 (append "Location" (string-append uri "/")))
+               (send msg (set-status (soup-status 'moved-permanently)))))
+            (else
+             (handle-page 'not-found "Page not found" render-error-page 'not-found)
+             (send msg (set-status (soup-status 'not-found))))))))
+
+(define *file-types*
+  '(("css" . "text/css")
+    ("txt" . "text/plain")))
+
+(define (file-content-type pathname)
+  (or (assoc-ref *file-types* (file-type (pathname-file pathname)))
+      "application/octet-stream"))
+
+(define (add-response-headers! msg . hdrs)
+  (let ((resp-hdrs (send msg (get-response-headers))))
+    (for-each (lambda (hdr/val)
+                (send resp-hdrs (append (car hdr/val) (cadr hdr/val))))
+              hdrs)))
+
+(define (static-file-handler base strip)
+  (lambda (method msg path query)
+    (define (ok!)
+      (send msg (set-status (soup-status 'ok))))
+    (let* ((rel-path (and-let* ((req-path (x->pathname path))
+                                (dirs (pathname-directory req-path))
+                                (stripped (and (>= (length dirs) strip)
+                                               (drop dirs strip))))
+                       (make-pathname #f stripped (pathname-file req-path))))
+           (pathname (and rel-path (pathname-join base rel-path))))
+      (cond ((and pathname
+                  (file-exists? pathname)
+                  (file-readable? pathname)
+                  (not (file-directory? pathname)))
+             (let ((content-type (file-content-type pathname)))
+               (case method
+                 ((get)
+                  (call-with-port (open-file-input-port (x->namestring pathname))
+                    (lambda (port)
+                      (send msg (set-response content-type 'copy (get-bytevector-all port)))
+                      (ok!))))
+                 ((head)
+                  (add-response-headers!
+                   msg
+                   "Content-Type" content-type
+                   "Content-Length" (number->string (file-size-in-bytes pathname)))
+                  (ok!))
+                 (else
+                  (send msg (set-status (soup-status 'not-implemented)))))))
+            (else
+             (send msg
+               (set-status (soup-status
+                            (if (and pathname (file-exists? pathname)) 'forbidden 'not-found)))))))))
 
 (define (xhtml-page title sxml)
   (string-append
@@ -126,22 +217,18 @@
                 (meta (^ (name "GENERATOR")
                          (content "irc2html.sps by MJ Ray, hacked by Andreas Rottmann")))
                 (title ,title)
+                (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
+                         (href "/static/screen.css")))
                 (style (^ (type "text/css"))
-                  "<!--
-                           body { background: #fff; color: #000; }
-                           a:link,a:visited,a:active { background: #0ff; color: #006; }
-                           #foot { font-size: x-small; }
-                           "
+                  "<!-- \n"
                   ,@(map
                      (lambda (x)
                        (string-substitute ".n<0> { background: #<1> }\n"
                                           (list x (integer->color x))
                                           'abrackets))
                      '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26))
-             
-                  "
-             .meta { color: #999 }
-             // -->"))
+
+                  "\n// -->"))
                (body ,@sxml))
         port)))))
 
@@ -153,17 +240,17 @@
 
 (define (integer->bits num base) ; int int -> (int ...)
   (if (= num 0)
-    '()
-    (cons (modulo num base) (integer->bits (quotient num base) base))))
+      '()
+      (cons (modulo num base) (integer->bits (quotient num base) base))))
 
 (define colors '("e" "c" "a"))
 
 (define (integer->color num) ; int -> str
   (let ((nb (append (integer->bits num 3) '(0 0 0))))
     (string-append
-      (list-ref colors (list-ref nb 0))
-      (list-ref colors (list-ref nb 1))
-      (list-ref colors (list-ref nb 2)))))
+     (list-ref colors (list-ref nb 0))
+     (list-ref colors (list-ref nb 1))
+     (list-ref colors (list-ref nb 2)))))
 
 (define (println fmt . args)
   (string-substitute #t fmt args 'braces)

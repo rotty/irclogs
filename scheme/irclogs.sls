@@ -60,6 +60,7 @@
          body ...))))
 
   (define (update-state state-dir log-dir tree-struct)
+    (create-directory* state-dir)
     (let* ((date-fmt "~Y-~m-~d ~H:~M:~S ~z")
            (update-file (pathname-with-file state-dir "last-update"))
            (last-update (and-let* ((date-str (and (file-exists? update-file)
@@ -218,21 +219,25 @@
            (string=? type (last (file-types file))))))
 
   (define (get-state state-dir year tag channel)
-    (directory-fold state-dir
-                    (lambda (entry state)
-                      (if (and (pathname-has-type? entry "state")
-                               (file-readable? entry))
-                          (receive (st-year st-tag st-channel) (parse-state-pathname entry)
-                            (if (and st-year st-tag st-channel
-                                     (or (eqv? year #f) (= year st-year))
-                                     (or (eqv? tag #f)  (string=? tag st-tag))
-                                     (or (eqv? channel #f) (string=? channel st-channel)))
-                                (let ((entries
-                                       (call-with-input-file (x->namestring entry) read)))
-                                  (cons (cons* st-year st-tag st-channel entries) state))
-                                state))
-                          state))
-                    '()))
+    (if (file-exists? state-dir)
+        (directory-fold state-dir
+                        (lambda (entry state)
+                          (if (and (pathname-has-type? entry "state")
+                                   (file-readable? entry))
+                              (receive (st-year st-tag st-channel) (parse-state-pathname entry)
+                                (if (and st-year st-tag st-channel
+                                         (or (eqv? year #f) (= year st-year))
+                                         (or (eqv? tag #f)  (string=? tag st-tag))
+                                         (or (eqv? channel #f) (string=? channel st-channel)))
+                                    (let ((entries
+                                           (call-with-input-file (x->namestring entry) read)))
+                                      (cons (cons* st-year st-tag st-channel entries) state))
+                                    state))
+                              state))
+                        '())
+        (begin
+          (create-directory* state-dir)
+          '())))
 
   (define parse-state-pathname
     (let ((rx (sre->irregex `(: (submatch-named year (+ digit)) "-"
@@ -252,6 +257,7 @@
     (receive (days rows)
              (state-tabularize (current-year) (state-sort `((0 . ,string<?) (1 . ,string<?)) state) 2)
       `((table
+         (^ (class "channels"))
          (tr (th "Network") (th "Channel")
              ,@(map (lambda (day)
                       `(th ,(ssubst "{0}-{1}" (car day) (cadr day))))
@@ -261,10 +267,22 @@
                         (channel (cadr row)))
                     `(tr (td ,(tag-link tag))
                          (td ,(channel-link tag channel))
-                         ,@(map (lambda (elt)
-                                  `(td ,(assq-ref elt 'message-count)))
-                                (vector->list (caddr row))))))
+                         ,@(channel-days-tds tag channel days (caddr row)))))
                 rows)))))
+
+
+  (define (channel-days-tds tag channel days prop-vec)
+    (vector-fold-right
+     (lambda (i markup day props)
+       (cons
+        `(td ,(cond ((assq-ref props 'message-count)
+                     => (lambda (count)
+                          (day-link tag channel day (number->string (car count)))))
+                    (else "")))
+        markup))
+     '()
+     days
+     prop-vec))
 
   (define (tag-link tag)
     `(a (^ (href ,(url-escape (string-append tag "/")))) ,tag))
@@ -272,6 +290,10 @@
   (define (channel-link tag channel)
     `(a (^ (href ,(url-escape (string-append tag "/" channel)))) ,channel))
 
+  (define (day-link tag channel day text)
+    `(a (^ (href ,(url-escape (ssubst "{0}/{1}/{2}-{3}" tag channel (car day) (cadr day)))))
+        ,text))
+  
   (define url-escape
     (let ((safe-cs (char-set-union char-set:letter
                                    char-set:digit
@@ -313,7 +335,9 @@
                    (loop (list-select < = min-date (car dates))
                          (list-select > = max-date (car dates))
                          (cdr dates))))
-      (let ((days (list->vector (days-between year min-date max-date))))
+      (let ((days (if (and min-date max-date)
+                      (list->vector (days-between year min-date max-date))
+                      '#())))
         (values days
                 (map (lambda (entry)
                        (receive (head tail) (split-at entry split)
