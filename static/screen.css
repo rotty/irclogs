@@ -1,24 +1,92 @@
-body { 
-    background: #fff; 
-    color: #000; 
+body {
+  background-color: white;
+  color: #000;
+  font-family: sans-serif;
+  background: white;
+  padding: 0px;
+  margin: 0px;
 }
-a:link,a:visited,a:active { 
-    background: #0ff; 
-    color: #006; 
+
+h1, h2 {
+    width: 100%;
+    text-align: center;
 }
+
+#content {
+    float: right;
+    width: 100%;
+}
+
+a:link {
+  color: #00f;
+  text-decoration: none;
+}
+
+a:visited {
+  color: #800;
+  text-decoration: none;
+}
+
+a:hover:link, a:active:link {
+  color: #eee;
+  background-color: #00f;
+}
+
+a:hover:visited, a:active:visited {
+  color: #eee;
+  background-color: #800;
+}
+
 #foot {
-    font-size: x-small; 
+    font-size: x-small;
 }
-table.channels { 
+
+table.activity {
+    border-collapse: collapse;
     border-width: thin;
-    border-style: dashed; 
+    border-style: dashed;
+    margin-left: auto;
+    margin-right: auto;
 }
-table.channels th {
+table.activity th {
     border-width: thin;
-    border-style: dashed; 
+    border-style: dashed;
+    padding-left: 0.3em;
+    padding-right: 0.3em;
+    text-align: center;
 }
-table.channels td {
+table.activity td {
     border-width: thin;
-    border-style: dashed; 
+    border-style: dashed;
+    padding-left: 0.3em;
+    padding-right: 0.3em;
+    width: 4em;
+    text-align: center;
 }
-.meta { color: #999 }
+
+table.mactivity {
+    border-collapse: collapse;
+    border-width: thin;
+    border-style: dashed;
+    margin-left: auto;
+    margin-right: auto;
+}
+table.mactivity th {
+    border-width: thin;
+    border-style: dashed;
+    padding-left: 0.3em;
+    padding-right: 0.3em;
+    text-align: center;
+}
+table.mactivity td {
+    border-width: thin;
+    border-style: dashed;
+    padding-left: 0.3em;
+    padding-right: 0.3em;
+    width: 5em;
+    text-align: center;
+}
+
+.meta { color: #999; }
+.even { background-color: #e2e2ff; }
+.odd { background-color: #f2f2ff; }

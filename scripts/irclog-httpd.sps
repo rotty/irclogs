@@ -28,11 +28,13 @@
         (spells receive)
         (spells parameter)
         (spells alist)
-        (only (spells strings) string-join)
+        (only (spells strings) string-join string-concatenate)
         (only (spells lists) unfold drop)
         (spells string-substitute)
         (spells pathname)
         (spells filesys)
+        (spells time-lib)
+        (spells foreign)
         (spells tracing)
         (sxml simple)
         (sbank soup)
@@ -45,6 +47,7 @@
  (prefix (only ("GLib" #f)
                thread-init
                main-loop-new main-loop-run
+               timeout-add-seconds
                markup-escape-text)
          g-)
  (prefix (only ("Soup" #f) <server> status-get-phrase)
@@ -63,6 +66,7 @@
   '((port 8001)
     (static-files "./static")
     (irclogs
+     (base-url "/")
      (log-dir ".")
      (state-dir "./.irclogs-state"))))
 
@@ -95,6 +99,10 @@
         (unless server
           (bail-out "Unable to bind to server port {0}\n" port))
         (irclogs 'update-state)
+        (g-timeout-add-seconds
+         60
+         (lambda (user-data) (irclogs 'update-state) #t)
+         (integer->pointer 0)) ;; Workaround, will go away
         (send server
           (add-handler #f (wrap-handler (irclogs-handler irclogs)))
           (add-handler "/static/" (wrap-handler
@@ -140,20 +148,45 @@
        (lambda ()
          (values "text/html"
                  (string->utf8
-                  (xhtml-page title (if (procedure? message)
-                                        (apply message args)
-                                        (apply irclogs message args))))))))
-    (let ((pathname (x->pathname path)))
+                  (xhtml-page irclogs title
+                              (if (procedure? message)
+                                  (apply message args)
+                                  (apply irclogs message args))))))))
+    (let* ((pathname (x->pathname path))
+           (comps (pathname-directory pathname))
+           (n-comps (length comps)))
       (cond ((pathname=? pathname (make-pathname '/ '() #f))
-             (handle-page 'ok "IRC activity overview" 'render-overview/html))
+             (handle-page 'ok  (page-title) 'render-overview/html (current-year) #f #f))
             ((pathname-file pathname)
              (let ((uri (send (send msg (get-uri)) (to-string #f))))
                (send (send msg (get-response-headers))
                  (append "Location" (string-append uri "/")))
                (send msg (set-status (soup-status 'moved-permanently)))))
+            ((or (and (= n-comps 1)
+                      (irclogs 'render-overview/html (current-year) (car comps) #f))
+                 (and (= n-comps 2)
+                      (irclogs 'render-overview/html (current-year) (car comps) (cadr comps)))
+                 (and (= n-comps 3)
+                      (apply irclogs 'render-log/html comps)))
+             => (lambda (sxml)
+                  (handle-page 'ok (apply page-title comps) (lambda () sxml))))
             (else
              (handle-page 'not-found "Page not found" render-error-page 'not-found)
              (send msg (set-status (soup-status 'not-found))))))))
+
+(define page-title
+  (case-lambda
+    ((tag channel date)
+     (ssubst "IRC log for {0}/{1} {2}" tag channel date))
+    ((tag channel)
+     (ssubst "IRC activity for {0}/{1}" tag channel))
+    ((tag)
+     (ssubst "IRC activity for {0} channels" tag))
+    (()
+     "IRC activity overview")))
+
+(define (current-year)
+  (date-year (current-date 0)))
 
 (define *file-types*
   '(("css" . "text/css")
@@ -203,7 +236,7 @@
                (set-status (soup-status
                             (if (and pathname (file-exists? pathname)) 'forbidden 'not-found)))))))))
 
-(define (xhtml-page title sxml)
+(define (xhtml-page irclogs title sxml)
   (string-append
    "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"
     \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">"
@@ -218,17 +251,17 @@
                          (content "irc2html.sps by MJ Ray, hacked by Andreas Rottmann")))
                 (title ,title)
                 (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
-                         (href "/static/screen.css")))
+                         (href ,(string-append (irclogs 'base-url) "static/screen.css"))))
                 (style (^ (type "text/css"))
-                  "<!-- \n"
-                  ,@(map
-                     (lambda (x)
-                       (string-substitute ".n<0> { background: #<1> }\n"
-                                          (list x (integer->color x))
-                                          'abrackets))
-                     '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26))
-
-                  "\n// -->"))
+                  ,(string-concatenate
+                    (append
+                     (list "\n")
+                     (map
+                      (lambda (x)
+                        (string-substitute ".n<0> { background: #<1> }\n"
+                                           (list x (integer->color x))
+                                           'abrackets))
+                      '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26))))))
                (body ,@sxml))
         port)))))
 

@@ -29,9 +29,11 @@
           irc-log-entry-type
           irc-log-entry-nick
           irc-log-entry-message
+          fold-irc-log-file
           parse-irc-log-file)
   (import (rnrs)
           (xitomatl srfi and-let*)
+          (spells receive)
           (spells pathname)
           (spells misc)
           (spells tracing)
@@ -73,8 +75,12 @@
         (make-irc-log-entry #f #f #f #f #f str)))
 
   (define (parse-irc-log-file port)
-    (let loop ((parsed '()))
+    (reverse (fold-irc-log-file port cons '())))
+  
+  (define (fold-irc-log-file port combiner . seeds)
+    (let loop ((seeds seeds))
       (let ((line (get-line port)))
         (if (eof-object? line)
-            (reverse parsed)
-            (loop (cons (parse-line line) parsed)))))))
+            (apply values seeds)
+            (receive new-seeds (apply combiner (parse-line line) seeds)
+              (loop new-seeds)))))))
