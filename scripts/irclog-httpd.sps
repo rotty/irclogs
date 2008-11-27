@@ -28,6 +28,7 @@
         (spells receive)
         (spells parameter)
         (spells alist)
+        (spells table)
         (only (spells strings) string-join string-concatenate)
         (only (spells lists) unfold drop)
         (spells string-substitute)
@@ -35,11 +36,13 @@
         (spells filesys)
         (spells time-lib)
         (spells foreign)
+        (spells misc)
         (spells tracing)
         (sxml simple)
         (sbank soup)
         (sbank typelib)
         (sbank ctypes basic)
+        (irclogs utils)
         (irclogs))
 
 (soup-setup!)
@@ -47,7 +50,7 @@
  (prefix (only ("GLib" #f)
                thread-init
                main-loop-new main-loop-run
-               timeout-add-seconds
+               timeout-add-seconds idle-add
                markup-escape-text)
          g-)
  (prefix (only ("Soup" #f) <server> status-get-phrase)
@@ -89,13 +92,64 @@
     (lambda (port)
       (unfold eof-object? values (lambda (x) (read port)) (read port)))))
 
+(define-record-type task-result
+  (fields task-id msg val))
+
+(define (task-result-values result)
+  (values (task-result-task-id result)
+          (task-result-msg result)
+          (task-result-val result)))
+
+(define new-task-id
+  (let ((counter 0))
+    (lambda ()
+      (set! counter (+ counter 1))
+      counter)))
+
 (define (irclog-httpd config)
   (g-thread-init #f)
   (let ((port (car (assq-ref config 'port))))
     (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
       (let ((server (send <soup-server> (new/props 'port port
                                                    'server-header "irclog-httpd")))
-            (irclogs (make-irclogs (assq-ref config 'irclogs))))
+            (irclogs (make-irclogs (assq-ref config 'irclogs)))
+            (n-active-tasks 0)
+            (task-table (make-table 'eqv))
+            (scheduler (make-scheduler)))
+        (define (task-title task-id)
+          (table-ref task-table task-id))
+        (define (scheduler-idle-callback user-data)
+          (scheduler-work scheduler
+                          (lambda (result)
+                            (receive (task-id msg val) (task-result-values result)
+                              (set! n-active-tasks (- n-active-tasks 1))
+                              (println "task {0} finished; {1} still active"
+                                       task-id n-active-tasks)
+                              (handle-page (irclogs 'base-url) msg 'ok (task-title task-id)
+                                           (lambda () val))
+                              (table-set! task-table task-id #f)
+                              (log-msg-result task-id msg)
+                              (send server (unpause-message msg))))
+                          (lambda (result)
+                            (receive (task-id msg val) (task-result-values result)
+                              (println "<task {0} '{1}'> yielded value {2}"
+                                       task-id (task-title task-id) val)
+                              #t))))
+        (define (defer-task title msg proc)
+          (let ((task-id (new-task-id)))
+            (let ((had-work? (scheduler-has-work? scheduler)))
+              (scheduler-enqueue! scheduler (lambda (yield)
+                                              (make-task-result
+                                               task-id
+                                               msg
+                                               (proc (lambda (v)
+                                                       (yield (make-task-result task-id msg v)))))))
+              (set! n-active-tasks (+ n-active-tasks 1))
+              (println "task {0} enqueued; {1} now active" task-id n-active-tasks)
+              (table-set! task-table task-id title)
+              (when (not had-work?)
+                (g-idle-add scheduler-idle-callback (integer->pointer 0))))
+            task-id))
         (unless server
           (bail-out "Unable to bind to server port {0}\n" port))
         (irclogs 'update-state)
@@ -103,8 +157,9 @@
          60
          (lambda (user-data) (irclogs 'update-state) #t)
          (integer->pointer 0)) ;; Workaround, will go away
+        (g-idle-add scheduler-idle-callback (integer->pointer 0))
         (send server
-          (add-handler #f (wrap-handler (irclogs-handler irclogs)))
+          (add-handler #f (wrap-handler (irclogs-handler defer-task irclogs)))
           (add-handler "/static/" (wrap-handler
                                    (static-file-handler
                                     (pathname-as-directory (car (assq-ref config 'static-files)))
@@ -124,44 +179,84 @@
       (let ((body (send msg (get-request-body))))
         (when (> (send body (get-length)) 0)
           (println (send body (get-data)))))
-      (handler (string->symbol (string-downcase method)) msg path query)
-      (println " -> {0} {1}" (send msg (get 'status-code)) (send msg (get 'reason-phrase))))))
+      (let ((task-id (handler server msg path query)))
+        (if task-id
+            (println " -> <task {0}>" task-id)
+            (log-msg-result #f msg))))))
 
-(define (handle-get/head method msg code renderer)
-  (if (memq method '(get head))
-      (receive (content-type content) (renderer)
-        (case method
-          ((head)
-           (add-response-headers!
-            msg
-            "Content-Length" (number->string (bytevector-length content))))
-          (else
-           (send msg (set-response content-type 'copy content))))
-        (send msg (set-status (soup-status code))))
-      (send msg (set-status (soup-status 'not-implemented)))))
+(define (log-msg-result task-id msg)
+  (let ((prefix (if task-id
+                    (ssubst "<task {0}>" task-id)
+                    "")))
+    (println "{0} -> {1} {2}" prefix (send msg (get 'status-code)) (send msg (get 'reason-phrase)))))
 
-(define (irclogs-handler irclogs)
-  (lambda (method msg path query)
-    (define (handle-page code title message . args)
-      (handle-get/head
-       method msg code
-       (lambda ()
-         (values "text/html"
-                 (string->utf8
-                  (xhtml-page irclogs title
-                              (if (procedure? message)
-                                  (apply message args)
-                                  (apply irclogs message args))))))))
+(define (msg-method msg)
+  (string->symbol (string-downcase (send msg (get 'method)))))
+
+(define (handle-get/head msg code renderer)
+  (let ((method (msg-method msg)))
+    (if (memq method '(get head))
+        (receive (content-type content) (renderer)
+          (case method
+            ((head)
+             (add-response-headers!
+              msg
+              "Content-Length" (number->string (bytevector-length content))))
+            (else
+             (send msg (set-response content-type 'copy content))))
+          (send msg (set-status (soup-status code))))
+        (send msg (set-status (soup-status 'not-implemented))))))
+
+(define root-pathname (make-pathname '/ '() #f))
+
+(define (test-task yield)
+  (sleep-seconds 1)
+  (yield 'test-1)
+  (sleep-seconds 2)
+  (yield 'test-2)
+  (sleep-seconds 3)
+  `((h1 "Test task finished")))
+
+(define (handle-page base-url msg code title proc . args)
+  (handle-get/head
+   msg code
+   (lambda ()
+     (values "text/html"
+             (string->utf8
+              (xhtml-page base-url title (apply proc args))))))
+  #f)
+
+(define (irclogs-handler defer-task irclogs)
+  (define (invoke msg-name)
+    (lambda args
+      (apply irclogs msg-name args)))
+  (lambda (server msg path query)
+    (define (handle-task title proc)
+      (send server (pause-message msg))
+      (defer-task title msg proc))
     (let* ((pathname (x->pathname path))
            (comps (pathname-directory pathname))
-           (n-comps (length comps)))
-      (cond ((pathname=? pathname (make-pathname '/ '() #f))
-             (handle-page 'ok  (page-title) 'render-overview/html (current-year) #f #f))
+           (n-comps (length comps))
+           (base-url (irclogs 'base-url)))
+      (define (not-found)
+        (handle-page base-url msg 'not-found "Page not found" render-error-page 'not-found)
+        (send msg (set-status (soup-status 'not-found)))
+        #f)
+      (cond ((pathname=? pathname root-pathname)
+             (handle-page base-url msg 'ok  (page-title)
+                          (invoke 'render-overview/html) (current-year) #f #f))
             ((pathname-file pathname)
-             (let ((uri (send (send msg (get-uri)) (to-string #f))))
-               (send (send msg (get-response-headers))
-                 (append "Location" (string-append uri "/")))
-               (send msg (set-status (soup-status 'moved-permanently)))))
+             (or (and (pathname=? (pathname-with-file pathname #f) root-pathname)
+                      (let ((filename (file-namestring pathname)))
+                        (cond ((string=? filename "test.scm")
+                               (handle-task "Test task" test-task))
+                              (else
+                               #f))))
+                 (let ((uri (send (send msg (get-uri)) (to-string #f))))
+                   (send (send msg (get-response-headers))
+                     (append "Location" (string-append uri "/")))
+                   (send msg (set-status (soup-status 'moved-permanently)))
+                   #f)))
             ((or (and (= n-comps 1)
                       (irclogs 'render-overview/html (current-year) (car comps) #f))
                  (and (= n-comps 2)
@@ -169,10 +264,9 @@
                  (and (= n-comps 3)
                       (apply irclogs 'render-log/html comps)))
              => (lambda (sxml)
-                  (handle-page 'ok (apply page-title comps) (lambda () sxml))))
+                  (handle-page base-url msg 'ok (apply page-title comps) (lambda () sxml))))
             (else
-             (handle-page 'not-found "Page not found" render-error-page 'not-found)
-             (send msg (set-status (soup-status 'not-found))))))))
+             (not-found))))))
 
 (define page-title
   (case-lambda
@@ -203,7 +297,7 @@
               hdrs)))
 
 (define (static-file-handler base strip)
-  (lambda (method msg path query)
+  (lambda (server msg path query)
     (define (ok!)
       (send msg (set-status (soup-status 'ok))))
     (let* ((rel-path (and-let* ((req-path (x->pathname path))
@@ -217,7 +311,7 @@
                   (file-readable? pathname)
                   (not (file-directory? pathname)))
              (let ((content-type (file-content-type pathname)))
-               (case method
+               (case (msg-method msg)
                  ((get)
                   (call-with-port (open-file-input-port (x->namestring pathname))
                     (lambda (port)
@@ -234,9 +328,10 @@
             (else
              (send msg
                (set-status (soup-status
-                            (if (and pathname (file-exists? pathname)) 'forbidden 'not-found)))))))))
+                            (if (and pathname (file-exists? pathname)) 'forbidden 'not-found)))))))
+    #f))
 
-(define (xhtml-page irclogs title sxml)
+(define (xhtml-page base-url title sxml)
   (string-append
    "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"
     \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">"
@@ -251,7 +346,7 @@
                          (content "irc2html.sps by MJ Ray, hacked by Andreas Rottmann")))
                 (title ,title)
                 (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
-                         (href ,(string-append (irclogs 'base-url) "static/screen.css"))))
+                         (href ,(string-append base-url "static/screen.css"))))
                 (style (^ (type "text/css"))
                   ,(string-concatenate
                     (append
