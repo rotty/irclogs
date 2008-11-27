@@ -220,8 +220,9 @@
                   (string-append
                    "</ol><p id=\"foot\">Automatic markup by irc2html.sps"
                    " in {0} second(s) runtime</p></body></html>\n")
-                  (vector time-str))
-                 (string-substitute eport "{0}: {1} second(s)\n" (vector title time-str))))
+                  (vector time-str)
+                  'braces)
+                 (string-substitute eport "{0}: {1} second(s)\n" (vector title time-str) 'braces)))
               (else
                (display (link-string (color-line line)) oport)
                (loop)))))))

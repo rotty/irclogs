@@ -1,56 +1,35 @@
-    irc2html.scm - Convert IRC chat logs into valid HTML with valid CSS
-    Copyright 2003,2005 MJ Ray <mjr@dsl.pipex.com>
+# -*- org -*-
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
+* The irclogs Scheme system
+============================
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+This is a project that aims to provide a software library and tools that
+work on IRC log files.
 
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+The project is licenced under the GNU GPL, version 3 or later. See the
+file COPYING.
 
-USAGE
+** Tools included
 
-irc2html.scm requires MzScheme and its standard libraries, but very little
-else. Grab them from http://www.plt-scheme.org/ if you don't have them.
+- irc2html.sps :: Based based on irc2html.scm[0] by MJ Ray, this is a
+  IRC-Log-to-HTML converter. 
 
-irc2html.scm can be used as a simple pipe. It optionally takes one argument,
-which is put in the HTML page title. It reads a standard irc2 log file from
-stdin and generates HTML on stdout, so use pipes or < and > to redirect
-them to useful places. Debug information should come to stderr.
+  In comparison to the original tool, it additionally supports:
 
-Sometimes the colour generator will give two people colours which are very
-close, thanks to the diversity of nicknames and only using 27 colours.
-You can override them by putting nick-colour assignments in a file
-called .irc2html-colours in your current working directory. It should
-have the form
-  (("nick1" 14) ("nick2" 3))
-and so on (one set of brackets around everything). If a nickname isn't
-listed there, it uses the automatic colour again.
+  - running through entire directory trees of logs, with a
+    configurable tree structure (currently you have to change the code
+    to configure, but it's just one line).
 
-Basically, I look for a file which looks like:
-  *** This is a message
-  * nick does an action
-  <nick> I'm saying something
-and you should convert other things to this format, stripping control
-characters, reformatting lines, etc.  xchat produces log files in an
-odd tabbed format. You can convert them with a command like
-  sed -e 's/	/ /g;s/^... .. \(..:..:..\) \(.*\)$/\2 (\1)/;s/^<--/ <--/' <$1 | $HOME/tmp/logcolour/logcolour.scm 'AFFS-ctte 2003-4 meeting '^$1 | ssh affs cat '>public_html/priv/'^$1^'.html'
-if you use the rc shell.  bash is probably similar but different.
+  - Additional log file formats can be easily added.
 
+  However, its dependencies are more heavyweight, and I have not
+  tested it on MzScheme (the original implementation platform of
+  irc2html.scm), just on Ikarus Scheme.
 
-HACKING
+- irclog-httpd.sps :: An experimental web server that should
+  eventually provide online log searching, IRC activity overviews and
+  the like.
 
-I would love it if anyone else liked this software enough to extend it
-further.  I'm sure there are more things which could be improved, but
-this program does what I need now.  If you have questions about the
-workings, please email me and ask, adding the answers to these files.
+** Links
 
-Please, email me if you want to help.  My address is on the 2nd line above.
-
+[0] http://mjr.towers.org.uk/software.html
