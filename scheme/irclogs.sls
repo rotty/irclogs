@@ -109,9 +109,11 @@
                 seeds)
         (apply values seeds))))
 
-  (define (log-tree-update-list log-dir tree-struct last-update)
+  (define (log-tree-update-list log-dir tree-struct last-update match?)
     (define (update-entry vals path lst)
-      (if (or (not last-update) (time>? (file-modification-time path) last-update))
+      (if (and (or (not match?)
+                   (match? vals))
+               (or (not last-update) (time>? (file-modification-time path) last-update)))
           (let ((key (list (assq-ref vals 'year)
                            (assq-ref vals 'tag)
                            (assq-ref vals 'channel)))
@@ -255,7 +257,7 @@
                             count)
                         (cons (log-entry->shtml count entry) markup)))
               0 '())
-      `(table ,@(reverse markup))))
+      `(table (^ (class "log")) ,@(reverse markup))))
 
   (define (channel-days-tds base-url year tag channel days prop-vec . args)
     (let-optionals* args ((start 0)
@@ -460,6 +462,23 @@
                     (cons (list (date-month cur-date) (date-day cur-date))
                           days)))))))
 
+  (define (activity-nav-links date n-days)
+    `(br))
+
+  (define (sexp->matcher expr)
+    (define (submatcher mapper)
+      (let ((sub-matchers (map sexp->matcher (cdr expr))))
+        (lambda (vals)
+          (mapper (lambda (m) (m vals)) sub-matchers))))
+    (case (car expr)
+      ((and) (submatcher and-map))
+      ((or)  (submatcher or-map))
+      (else
+       (let ((rx (irregex (cadr expr))))
+         (lambda (vals)
+           (let ((val (assq-ref vals (car expr))))
+             (irregex-match rx val)))))))
+
   (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
 
   (define sre-alist
@@ -507,7 +526,9 @@
        (let ((name (list 'name)) ...)
          body ...))))
 
-  (define-privates %set-log-dir! %set-state-dir! %set-dir-struct! %get-state %set-base-url!)
+  (define-privates
+    %set-log-dir! %set-state-dir! %set-dir-struct! %get-state %set-base-url!
+    %matcher %set-matcher!)
 
   (define *irclogs* (*the-root-object* 'clone))
 
@@ -519,6 +540,7 @@
                     ((state-dir) (logs %set-state-dir! (pathname-as-directory (cadr entry))))
                     ((dir-struct) (logs %set-dir-struct! (cadr entry)))
                     ((base-url)   (logs %set-base-url! (cadr entry)))
+                    ((match)      (logs %set-matcher! (sexp->matcher (cadr entry))))
                     (else
                      (error 'make-irclogs "unknown option" entry))))
                 options)
@@ -542,6 +564,7 @@
                 (else
                  (let ((n-days (min 7 (vector-length days))))
                    `((h1 ,(breadcrumbs base-url tag channel #f))
+                     ,(activity-nav-links year n-days)
                      (table
                       (^ (class "activity"))
                       (thead
@@ -600,7 +623,7 @@
                                       '())
                                   (cdr entry))
                                  port)))))
-                  (log-tree-update-list log-dir tree-struct last-update))
+                  (log-tree-update-list log-dir tree-struct last-update (self %matcher)))
         (call-with-output-file/atomic update-file
           (lambda (port)
             (write (date->string (current-date 0) date-fmt) port))))))
@@ -616,7 +639,10 @@
                                   (if (and st-year st-tag st-channel
                                            (or (eqv? year #f) (= year st-year))
                                            (or (eqv? tag #f)  (string=? tag st-tag))
-                                           (or (eqv? channel #f) (string=? channel st-channel)))
+                                           (or (eqv? channel #f) (string=? channel st-channel))
+                                           ((self %matcher) `((year . ,st-year)
+                                                              (tag . ,st-tag)
+                                                              (channel . ,st-channel))))
                                       (let ((entries
                                              (call-with-input-file (x->namestring entry) read)))
                                         (cons (cons* st-year st-tag st-channel entries) state))
@@ -632,5 +658,6 @@
   (*irclogs* 'add-value-slot! 'dir-struct %set-dir-struct!
              '(tag (channel "." month "-" day ".log")))
   (*irclogs* 'add-value-slot! 'base-url %set-base-url! "/")
+  (*irclogs* 'add-value-slot! %matcher %set-matcher! #f)
 
   )
