@@ -38,7 +38,9 @@
         (spells foreign)
         (spells misc)
         (spells tracing)
+        (fmt)
         (sxml simple)
+        (sxml transform)
         (sbank soup)
         (sbank typelib)
         (sbank ctypes basic)
@@ -122,19 +124,20 @@
           (scheduler-work scheduler
                           (lambda (result)
                             (receive (task-id msg val) (task-result-values result)
+                              (val)
+                              (send server (unpause-message msg))
                               (set! n-active-tasks (- n-active-tasks 1))
                               (println "task {0} finished; {1} still active"
-                                       task-id n-active-tasks)
-                              (handle-page (irclogs 'base-url) msg 'ok (task-title task-id)
-                                           (lambda () val))
-                              (table-set! task-table task-id #f)
-                              (log-msg-result task-id msg)
-                              (send server (unpause-message msg))))
+                                       task-id n-active-tasks)))
                           (lambda (result)
                             (receive (task-id msg val) (task-result-values result)
                               (println "<task {0} '{1}'> yielded value {2}"
                                        task-id (task-title task-id) val)
-                              #t))))
+                              (when (and (not (eq? 'cancelled val))
+                                         (eq? 'chunked (send (send msg (get-response-headers))
+                                                         (get-encoding))))
+                                (send server (unpause-message msg)))
+                              (not (eq? 'cancelled val))))))
         (define (defer-task title msg proc)
           (let ((task-id (new-task-id)))
             (let ((had-work? (scheduler-has-work? scheduler)))
@@ -155,7 +158,9 @@
         (irclogs 'update-state)
         (g-timeout-add-seconds
          60
-         (lambda (user-data) (irclogs 'update-state) #t)
+         (lambda (user-data)
+           (irclogs 'update-state)
+           #t)
          (integer->pointer 0)) ;; Workaround, will go away
         (g-idle-add scheduler-idle-callback (integer->pointer 0))
         (send server
@@ -179,84 +184,168 @@
       (let ((body (send msg (get-request-body))))
         (when (> (send body (get-length)) 0)
           (println (send body (get-data)))))
-      (let ((task-id (handler server msg path query)))
-        (if task-id
-            (println " -> <task {0}>" task-id)
-            (log-msg-result #f msg))))))
-
-(define (log-msg-result task-id msg)
-  (let ((prefix (if task-id
-                    (ssubst "<task {0}>" task-id)
-                    "")))
-    (println "{0} -> {1} {2}" prefix (send msg (get 'status-code)) (send msg (get 'reason-phrase)))))
+      (let ((ready? (handler server msg path query)))
+        (println "ready: {0}" ready?)
+        (cond
+         (ready?
+          (println " -> {0} {1}" (send msg (get 'status-code)) (send msg (get 'reason-phrase))))
+         (else
+          (send server (pause-message msg))
+          (println " -> deferred")))))))
 
 (define (msg-method msg)
   (string->symbol (string-downcase (send msg (get 'method)))))
 
-(define (handle-get/head msg code renderer)
-  (let ((method (msg-method msg)))
-    (if (memq method '(get head))
-        (receive (content-type content) (renderer)
-          (case method
-            ((head)
-             (add-response-headers!
-              msg
-              "Content-Length" (number->string (bytevector-length content))))
-            (else
-             (send msg (set-response content-type 'copy content))))
-          (send msg (set-status (soup-status code))))
-        (send msg (set-status (soup-status 'not-implemented))))))
-
 (define root-pathname (make-pathname '/ '() #f))
 
-(define (test-task yield)
-  (sleep-seconds 1)
-  (yield 'test-1)
-  (sleep-seconds 2)
-  (yield 'test-2)
-  (sleep-seconds 3)
-  `((h1 "Test task finished")))
+(define (make-counter-task n)
+  (lambda (yield)
+    (let loop ((i 0))
+      (when (< i n)
+        (yield i)
+        (sleep-seconds 0.1)
+        (loop (+ i 1))))))
 
-(define (handle-page base-url msg code title proc . args)
-  (handle-get/head
-   msg code
-   (lambda ()
-     (values "text/html"
-             (string->utf8
-              (xhtml-page base-url title (apply proc args))))))
-  #f)
 
-(define (irclogs-handler defer-task irclogs)
+(define (render-counter-page n)
+  (let ((task (make-counter-task n)))
+    `((div
+       (^ (align "center"))
+       (h1 ,(ssubst "Counting up to {0} (starting at 0)" (- n 1)))
+       (p (task
+           ,(lambda (port yield)
+              (let ((timer (start-timer)))
+                (task (lambda (i)
+                        (fprintf port "count: {0}<br/>" i)
+                        (yield #t)))
+                (fprintf port "Successfully counted from 0 to {0} in {1} seconds.</br>"
+                         (- n 1) (fmt #f (num (inexact (timer)) 10 4)))))))))))
+
+(define (counter-page-renderer query)
+  (render-counter-page 30))
+
+(define xhtml-doctype
+  "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"
+    \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">")
+
+(define (handle-page base-url msg code title defer proc . args)
+  (let ((method (msg-method msg))
+        (resp-body (send msg (get-response-body)))
+        (http-version (send msg (get 'http-version))))
+    (receive (port flush) (make-soup-output-port+flusher resp-body)
+      (case method
+        ((get head)
+         (add-response-headers! msg '("Content-Type" . "text/html; charset=utf-8"))
+         (case method
+           ((get)
+            (when (> http-version 0)
+              (send resp-body (set-accumulate #f)))
+            (let* ((last-proc #f)
+                   (go-on #f)
+                   (escape #f)
+                   (tasks-done? #f)
+                   (message-done? #f)
+                   (first-escape? #t)
+                   (sxml (pre-post-order
+                          (apply proc args)
+                          `((task *PREORDER* .
+                                  ,(lambda (tag proc)
+                                     (letrec ((decorated
+                                               (lambda (port)
+                                                 (call/cc
+                                                  (lambda (k)
+                                                    (set! go-on k)
+                                                    (defer title msg
+                                                      (lambda (yield)
+                                                        (proc port
+                                                              (lambda (v)
+                                                                (cond (message-done?
+                                                                       (yield 'cancelled))
+                                                                      (else
+                                                                       (flush-output-port port)
+                                                                       (flush)
+                                                                       (yield v)))))
+                                                        (if (eq? decorated last-proc)
+                                                            (lambda ()
+                                                              (let ((cont go-on))
+                                                                (call/cc
+                                                                 (lambda (k)
+                                                                   (set! go-on k)
+                                                                   (set! tasks-done? #t)
+                                                                   (cont)))))
+                                                            go-on)))
+                                                    (escape))))))
+                                       (set! last-proc decorated)
+                                       decorated)))
+                            (*DEFAULT* . ,list)))))
+              (when (and last-proc (> http-version 0))
+                (send (send msg (get-response-headers))
+                  (set-encoding 'chunked))
+                (send msg (connect 'finished (lambda (msg)
+                                               (set! message-done? #t)))))
+              (let ((tport (transcoded-port port (make-transcoder (utf-8-codec)))))
+                (put-string tport xhtml-doctype)
+                (call/cc
+                 (lambda (k)
+                   (set! escape k)
+                   (xhtml-page tport base-url title sxml)))
+                (unless message-done?
+                  (flush-output-port tport)
+                  (flush))
+                (cond ((and last-proc tasks-done?)
+                       (close-output-port tport)
+                       (go-on)) ; here we escape back into the idle worker
+                      ((or (not last-proc) first-escape?)
+                       (set! first-escape? #f)
+                       (when (not last-proc)
+                         (close-output-port tport))
+                       (send msg (set-status (soup-status 'ok)))
+                       ;; return wether the message is ready to be
+                       ;; sent, which is always the case, except when
+                       ;; using HTTP 1.0 and there was a task involved
+                       ;; (as HTTP 1.0 doesn't support chunked
+                       ;; encoding)
+                       (not (and (= http-version 0) last-proc)))))))))
+            (else
+             (send msg (set-status (soup-status 'not-implemented)))
+             #t)))))
+
+(define (irclogs-handler defer irclogs)
   (define (invoke msg-name)
     (lambda args
       (apply irclogs msg-name args)))
   (lambda (server msg path query)
-    (define (handle-task title proc)
-      (send server (pause-message msg))
-      (defer-task title msg proc))
     (let* ((pathname (x->pathname path))
            (comps (pathname-directory pathname))
            (n-comps (length comps))
            (base-url (irclogs 'base-url)))
       (define (not-found)
-        (handle-page base-url msg 'not-found "Page not found" render-error-page 'not-found)
+        (handle-page base-url msg 'not-found "Page not found" defer render-error-page 'not-found)
         (send msg (set-status (soup-status 'not-found)))
-        #f)
+        #t)
       (cond ((pathname=? pathname root-pathname)
-             (handle-page base-url msg 'ok  (page-title)
+             (handle-page base-url msg 'ok  (page-title) defer
                           (invoke 'render-overview/html) (current-year) #f #f))
             ((pathname-file pathname)
-             (or (and (pathname=? (pathname-with-file pathname #f) root-pathname)
-                      (let ((filename (file-namestring pathname)))
-                        (cond ((string=? filename "test.scm")
-                               (handle-task "Test task" test-task))
-                              (else
-                               #f))))
-                 (let ((uri (send (send msg (get-uri)) (to-string #f))))
-                   (send (send msg (get-response-headers))
-                     (append "Location" (string-append uri "/")))
-                   (send msg (set-status (soup-status 'moved-permanently)))
-                   #f)))
+             (receive (found? ready?)
+                      (cond ((pathname=? (pathname-with-file pathname #f) root-pathname)
+                             (let ((filename (file-namestring pathname)))
+                               (cond ((string=? filename "count.scm")
+                                      (values
+                                       #t
+                                       (handle-page base-url msg 'ok "Counter task" defer
+                                                    counter-page-renderer query)))
+                                     (else
+                                      (values #f #f)))))
+                            (else
+                             (values #f #f)))
+               (if found?
+                   ready?
+                   (let ((uri (send (send msg (get-uri)) (to-string #f))))
+                     (send (send msg (get-response-headers))
+                       (append "Location" (string-append uri "/")))
+                     (send msg (set-status (soup-status 'moved-permanently)))
+                     #t))))
             ((or (and (= n-comps 1)
                       (irclogs 'render-overview/html (current-year) (car comps) #f))
                  (and (= n-comps 2)
@@ -264,7 +353,7 @@
                  (and (= n-comps 3)
                       (apply irclogs 'render-log/html comps)))
              => (lambda (sxml)
-                  (handle-page base-url msg 'ok (apply page-title comps) (lambda () sxml))))
+                  (handle-page base-url msg 'ok (apply page-title comps) defer (lambda () sxml))))
             (else
              (not-found))))))
 
@@ -293,7 +382,7 @@
 (define (add-response-headers! msg . hdrs)
   (let ((resp-hdrs (send msg (get-response-headers))))
     (for-each (lambda (hdr/val)
-                (send resp-hdrs (append (car hdr/val) (cadr hdr/val))))
+                (send resp-hdrs (append (car hdr/val) (cdr hdr/val))))
               hdrs)))
 
 (define (static-file-handler base strip)
@@ -320,8 +409,8 @@
                  ((head)
                   (add-response-headers!
                    msg
-                   "Content-Type" content-type
-                   "Content-Length" (number->string (file-size-in-bytes pathname)))
+                   (cons "Content-Type" content-type)
+                   (cons "Content-Length" (number->string (file-size-in-bytes pathname))))
                   (ok!))
                  (else
                   (send msg (set-status (soup-status 'not-implemented)))))))
@@ -329,36 +418,31 @@
              (send msg
                (set-status (soup-status
                             (if (and pathname (file-exists? pathname)) 'forbidden 'not-found)))))))
-    #f))
+    #t))
 
-(define (xhtml-page base-url title sxml)
-  (string-append
-   "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"
-    \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">"
-   (call-with-string-output-port
-     (lambda (port)
-       (sxml->xml
-        `(html (^ (xmlns "http://www.w3.org/1999/xhtml")
-                  (lang "en")
-                  (xml:lang "en"))
-               (head
-                (meta (^ (name "GENERATOR")
-                         (content "irc2html.sps by MJ Ray, hacked by Andreas Rottmann")))
-                (title ,title)
-                (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
-                         (href ,(string-append base-url "static/screen.css"))))
-                (style (^ (type "text/css"))
-                  ,(string-concatenate
-                    (append
-                     (list "\n")
-                     (map
-                      (lambda (x)
-                        (string-substitute ".n<0> { background: #<1> }\n"
-                                           (list x (integer->color x))
-                                           'abrackets))
-                      '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26))))))
-               (body ,@sxml))
-        port)))))
+(define (xhtml-page port base-url title sxml)
+  (sxml->xml
+   `(html (^ (xmlns "http://www.w3.org/1999/xhtml")
+             (lang "en")
+             (xml:lang "en"))
+          (head
+           (meta (^ (name "GENERATOR")
+                    (content "irc2html.sps by MJ Ray, hacked by Andreas Rottmann")))
+           (title ,title)
+           (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
+                    (href ,(string-append base-url "static/screen.css"))))
+           (style (^ (type "text/css"))
+             ,(string-concatenate
+               (append
+                (list "\n")
+                (map
+                 (lambda (x)
+                   (string-substitute ".n<0> { background: #<1> }\n"
+                                      (list x (integer->color x))
+                                      'abrackets))
+                 '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26))))))
+          (body ,@sxml))
+   port))
 
 (define (render-error-page code)
   (let ((code-num (soup-status code)))
@@ -386,6 +470,9 @@
 
 (define (ssubst fmt . args)
   (string-substitute #f fmt args 'braces))
+
+(define (fprintf port fmt . args)
+  (string-substitute port fmt args 'braces))
 
 (define (bail-out msg . args)
   (string-substitute (current-error-port) msg args)
