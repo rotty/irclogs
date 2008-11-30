@@ -39,7 +39,8 @@
         (spells tracing)
         (only (spells assert) cout)
         (fmt)
-        (xitomatl irregex))
+        (xitomatl irregex)
+        (irclogs utils))
 
 (define colors '("e" "c" "a"))
 (define color-override
@@ -156,31 +157,6 @@
 ;;                (line (list->string (member #\space (cddr lline)))))
 ;;           )
 ;;         ))
-
-(define (make-timer)
-  (let ((start-time (current-time))
-        (stop-time #f))
-    (define (elapsed)
-      (time-difference (or stop-time (current-time)) start-time))
-    (letrec ((timer (case-lambda
-                      ((action)
-                       (case action
-                         ((start)
-                          (set! start-time (current-time))
-                          (set! stop-time #f))
-                         ((stop) (set! stop-time (current-time)))
-                         ((step) (set! start-time (add-duration (current-time) (elapsed))))
-                         ((elapsed)
-                          (let ((diff (elapsed)))
-                            (+ (time-second diff) (/ (time-nanosecond diff) #e1e9))))))
-                      (()
-                       (timer 'elapsed)))))
-      timer)))
-
-(define (start-timer)
-  (let ((timer (make-timer)))
-    (timer 'start)
-    timer))
 
 (define (process-log iport title oport eport) ; port str port port -> void
   (let ((total-timer (start-timer)))

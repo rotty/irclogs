@@ -22,14 +22,42 @@
 ;;; Code:
 
 (library (irclogs utils)
-  (export make-scheduler scheduler? scheduler-work scheduler-enqueue!
+  (export make-timer start-timer
+
+          make-scheduler scheduler? scheduler-work scheduler-enqueue!
           scheduler-has-work?)
   (import (rnrs)
           (spells receive)
           (spells opt-args)
           (spells queue)
+          (spells time-lib)
           (only (spells assert) cout)
           (spells tracing))
+
+  (define (make-timer)
+    (let ((start-time (current-time))
+          (stop-time #f))
+      (define (elapsed)
+        (time-difference (or stop-time (current-time)) start-time))
+      (letrec ((timer (case-lambda
+                        ((action)
+                         (case action
+                           ((start)
+                            (set! start-time (current-time))
+                            (set! stop-time #f))
+                           ((stop) (set! stop-time (current-time)))
+                           ((step) (set! start-time (add-duration (current-time) (elapsed))))
+                           ((elapsed)
+                            (let ((diff (elapsed)))
+                              (+ (time-second diff) (/ (time-nanosecond diff) #e1e9))))))
+                        (()
+                         (timer 'elapsed)))))
+        timer)))
+
+  (define (start-timer)
+    (let ((timer (make-timer)))
+      (timer 'start)
+      timer))
 
   (define-record-type scheduler
     (fields
