@@ -259,6 +259,11 @@
               0 '())
       `(table (^ (class "log")) ,@(reverse markup))))
 
+  (define (footer)
+    `(div (^ (id "foot"))
+          ,(ssubst "Powered by the IRClogs System, running on {0} Scheme"
+                   (string-titlecase (symbol->string (scheme-dialect))))))
+
   (define (channel-days-tds base-url year tag channel days prop-vec . args)
     (let-optionals* args ((start 0)
                           (end (vector-length days))
@@ -581,7 +586,8 @@
                                        (th ,(channel-link base-url tag channel))
                                        ,@(channel-days-tds base-url year tag channel days
                                                            (cadddr row) 0 n-days))))
-                              rows)))))))))))
+                              rows)))
+                     ,(footer)))))))))
 
   (define-method (*irclogs* 'render-log/html self resend tag channel date)
     (receive (year month day) (parse-date date)
@@ -594,7 +600,8 @@
                   (call-with-input-file (x->namestring path)
                     (lambda (port)
                       `((h1 ,(breadcrumbs (self 'base-url) tag channel date))
-                        ,(log-file->shtml port)))))))))
+                        ,(log-file->shtml port)
+                        ,(footer)))))))))
 
   (define-method (*irclogs* 'update-state self resend)
     (let ((state-dir (self 'state-dir))

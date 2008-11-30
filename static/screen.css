@@ -38,7 +38,15 @@ a:hover:visited, a:active:visited {
 }
 
 #foot {
-    font-size: x-small;
+    padding: 1em;
+    font-size: small;
+    font-style: italic;
+    text-align: center;
+}
+
+table.log {
+    margin-left: auto;
+    margin-right: auto;
 }
 
 table.activity {
