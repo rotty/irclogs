@@ -274,8 +274,13 @@
 
   (define (footer)
     `(div (^ (id "foot"))
-          ,(ssubst "Powered by the IRClogs System, running on {0} Scheme"
-                   (string-titlecase (symbol->string (scheme-dialect))))))
+          (p ,(ssubst "Powered by the IRClogs System, running on {0} Scheme"
+                      (string-titlecase (symbol->string (scheme-dialect)))))
+          (p (a (^ (href "http://validator.w3.org/check?uri=referer"))
+                (img (^ (src "http://www.w3.org/Icons/valid-xhtml10-blue")
+                        (alt "Valid XHTML 1.0 Strict")
+                        (height 23)
+                        (width 66)))))))
 
   (define (channel-days-tds base-url tag channel days prop-vec . args)
     (let-optionals* args ((start 0)

@@ -37,6 +37,10 @@ a:hover:visited, a:active:visited {
   background-color: #800;
 }
 
+a img {
+    border: none;
+}
+
 #nav {
     float: right;
     width: 100%;
