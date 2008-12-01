@@ -21,6 +21,7 @@
           (spells filesys)
           (spells string-substitute)
           (spells tracing)
+          (fmt)
           (prometheus)
           (irclogs parse))
 
@@ -191,9 +192,9 @@
     (vals->pathname log-dir
                     `((tag . ,tag)
                       (channel . ,channel)
-                      (year . ,(number->string year))
-                      (month . ,(number->string month))
-                      (day . ,(number->string day)))
+                      (year . ,(num->str year 4))
+                      (month . ,(num->str month 2))
+                      (day . ,(num->str day 2)))
                     template))
 
   (define (parse-date s)
@@ -255,7 +256,7 @@
         ((action)
          (timed-row (nick-class) (list "* " (irc-log-entry-nick e) " " message)))
         ((event)
-         (timed-row "event" (list (irc-log-entry-type e) " " (irc-log-entry-nick e) message)))
+         (timed-row "event" (list (irc-log-entry-type e) " " (irc-log-entry-nick e) " " message)))
         (else
          `(tr (td (^ (class "meta") (colspan 2)) ,message))))))
 
@@ -369,8 +370,10 @@
 
   (define (day-link base-url tag channel day text)
     (receive (year month day) (apply values day)
-      `(a (^ (href ,(url-escape (ssubst "{0}{2}/{3}/{1}-{4}-{5}/"
-                                        base-url year tag channel month day))))
+      `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}-{4}-{5}/"
+                                        base-url
+                                        tag channel
+                                        (num->str year 4) (num->str month 4) (num->str day 2)))))
           ,text)))
 
   (define url-escape
@@ -391,6 +394,8 @@
                                      (string-concatenate (map encode utf8))))))))
                     s))))
 
+  (define (num->str n width)
+    (fmt #f (pad-char #\0 (pad/left 2 (num n)))))
 
   (define (str-escape escaper str)
     (string-concatenate-reverse

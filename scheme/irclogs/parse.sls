@@ -39,8 +39,12 @@
           (spells tracing)
           (xitomatl irregex))
 
-  (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
+  (define special-sre '("[]\\`_^{|}"))
+  (define nick-sre `(: (or alpha ,special-sre) (* (or alnum ,special-sre "-"))))
 
+  (define tm-h-m-s-sre '(: (submatch-named hours (** 1 2 digit)) ":"
+                           (submatch-named minutes (** 1 2 digit)) ":"
+                           (submatch-named seconds (** 1 2 digit))))
   (define log-formats
     (map
      (lambda (entry)
@@ -51,21 +55,24 @@
        ;; format used by irssi
        ((: (submatch-named hours (** 1 2 digit)) ":" (submatch-named minutes (** 1 2 digit))
            (+ white) (submatch-named type (+ (~ white))) (+ white)
-           (submatch-named nick ,ident-sre) (? (or ":" ">"))
+           (submatch-named nick ,nick-sre) (? (or ":" ">")) (+ white)
            (submatch-named line (* any)))
         (hours minutes #f type nick line))
        ;; format of http://tunes.org/~nef/logs/scheme/
-       ((: (submatch-named hours (** 1 2 digit)) ":" (submatch-named minutes (** 1 2 digit))
-           ":" (submatch-named seconds (** 1 2 digit))
-           " " (submatch-named type (or "<" "*"))
-           (submatch-named nick ,ident-sre) ">"
+       ((: ,tm-h-m-s-sre (+ white)
+           (submatch-named type (or "*" "<")) (? white)
+           (submatch-named nick ,nick-sre) (? ">") (+ white)
            (submatch-named line (* any)))
         (hours minutes seconds type nick line))
+       ((: ,tm-h-m-s-sre (+ white) "---" (+ white) (+ (~ white)) ":" (+ white)
+           (submatch-named nick ,nick-sre) (+ white)
+           (submatch-named line (* any)))
+        (hours minutes seconds "---" nick line))
        )))
 
   (define-record-type irc-log-entry
     (fields hours minutes seconds type nick message))
-  
+
   (define (parse-line str)              ; str -> list
     (define (submatches match names)
       (map (lambda (name)
@@ -81,7 +88,7 @@
 
   (define (parse-irc-log-file port)
     (reverse (fold-irc-log-file port cons '())))
-  
+
   (define (fold-irc-log-file port combiner . seeds)
     (let loop ((seeds seeds))
       (let ((line (get-line port)))
