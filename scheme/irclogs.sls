@@ -363,17 +363,18 @@
     `(a (^ (href ,base-url)) "IRC"))
 
   (define (tag-link base-url tag)
-    `(a (^ (href ,(url-escape (string-append base-url tag "/")))) ,tag))
+    `(a (^ (href ,(url-escape (string-append base-url tag "/") "/"))) ,tag))
 
   (define (channel-link base-url tag channel)
-    `(a (^ (href ,(url-escape (string-append base-url tag "/" channel "/")))) ,channel))
+    `(a (^ (href ,(url-escape (string-append base-url tag "/" channel "/") "/"))) ,channel))
 
   (define (day-link base-url tag channel day text)
     (receive (year month day) (apply values day)
       `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}-{4}-{5}/"
                                         base-url
                                         tag channel
-                                        (num->str year 4) (num->str month 4) (num->str day 2)))))
+                                        (num->str year 4) (num->str month 4) (num->str day 2))
+                                "/")))
           ,text)))
 
   (define url-escape
@@ -382,17 +383,18 @@
                                    (string->char-set "$-_.+!*'(),/"))))
       (define (encode code)
         (string-append "%" (number->string code 16)))
-      (lambda (s)
-        (str-escape (lambda (c)
-                      (if (char-set-contains? safe-cs c)
-                          (string c)
-                          (let ((code (char->integer c)))
-                            (cond ((< code 256)
-                                   (encode code))
-                                  (else
-                                   (let ((utf8 (bytevector->u8-list (string->utf8 (string c)))))
-                                     (string-concatenate (map encode utf8))))))))
-                    s))))
+      (lambda (s safe-add)
+        (let ((safe-cs (char-set-union safe-cs (string->char-set safe-add))))
+          (str-escape (lambda (c)
+                        (if (char-set-contains? safe-cs c)
+                            (string c)
+                            (let ((code (char->integer c)))
+                              (cond ((< code 256)
+                                     (encode code))
+                                    (else
+                                     (let ((utf8 (bytevector->u8-list (string->utf8 (string c)))))
+                                       (string-concatenate (map encode utf8))))))))
+                      s)))))
 
   (define (num->str n width)
     (fmt #f (pad-char #\0 (pad/left 2 (num n)))))
@@ -598,9 +600,13 @@
          body ...))))
 
   (define-privates
-    %set-log-dir! %set-state-dir! %set-dir-struct! %get-state %set-base-url!
+    %set-log-dir! %set-state-dir!
+    %set-dir-struct!
+    %get-state
+    %set-base-url!
     %matcher %set-matcher!
-    %activity-nav-links)
+    %activity-nav-links
+    %log-nav-links)
 
   (define *irclogs* (*the-root-object* 'clone))
 
@@ -670,6 +676,7 @@
                   (call-with-input-file (x->namestring path)
                     (lambda (port)
                       `((h1 ,(breadcrumbs (self 'base-url) tag channel date))
+                        ,(self %log-nav-links tag channel (mk-date year month day))
                         ,(log-file->shtml port)
                         ,(footer)))))))))
 
@@ -753,7 +760,19 @@
           (loc (string-concatenate (append (if tag (list tag "/") '())
                                            (if channel (list channel "/"))))))
       (define (date-link date text)
-        (let ((url (ssubst "{0}{1}?date={2}" (self 'base-url) loc (isodate-str date))))
+        (let ((url (url-escape (ssubst "{0}{1}?date={2}" (self 'base-url) loc (isodate-str date))
+                               "/?")))
+          `(a (^ (href ,url)) ,text)))
+      `(div (^ (id "nav"))
+            ,(date-link next-date "<<")
+            ,(date-link prev-date ">>"))))
+
+  (define-method (*irclogs* %log-nav-links self resend tag channel date)
+    (let ((next-date (date+days date 1))
+          (prev-date (date+days date -1))
+          (loc (string-append tag "/" channel "/")))
+      (define (date-link date text)
+        (let ((url (url-escape (string-append (self 'base-url) loc (isodate-str date) "/") "/")))
           `(a (^ (href ,url)) ,text)))
       `(div (^ (id "nav"))
             ,(date-link next-date "<<")
