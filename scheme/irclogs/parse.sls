@@ -46,17 +46,22 @@
      (lambda (entry)
        (cons (sre->irregex (car entry))
              (cdr entry)))
-     `(((: (submatch-named hours (** 1 2 digit)) ":" (submatch-named minutes (** 1 2 digit))
-           " " (submatch-named type (+ (~ white))) " "
+
+     `(
+       ;; format used by irssi
+       ((: (submatch-named hours (** 1 2 digit)) ":" (submatch-named minutes (** 1 2 digit))
+           (+ white) (submatch-named type (+ (~ white))) (+ white)
            (submatch-named nick ,ident-sre) (? (or ":" ">"))
            (submatch-named line (* any)))
         (hours minutes #f type nick line))
+       ;; format of http://tunes.org/~nef/logs/scheme/
        ((: (submatch-named hours (** 1 2 digit)) ":" (submatch-named minutes (** 1 2 digit))
            ":" (submatch-named seconds (** 1 2 digit))
            " " (submatch-named type (or "<" "*"))
            (submatch-named nick ,ident-sre) ">"
            (submatch-named line (* any)))
-        (hours minutes seconds type nick line)))))
+        (hours minutes seconds type nick line))
+       )))
 
   (define-record-type irc-log-entry
     (fields hours minutes seconds type nick message))
