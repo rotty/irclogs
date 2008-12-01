@@ -37,6 +37,18 @@ a:hover:visited, a:active:visited {
   background-color: #800;
 }
 
+#nav {
+    float: right;
+    width: 100%;
+    text-align: center;
+    padding: 1em;
+}
+
+#nav a {
+    padding-left: 1em;
+    padding-right: 1em;
+}
+
 #foot {
     padding: 1em;
     font-size: small;

@@ -264,16 +264,16 @@
           ,(ssubst "Powered by the IRClogs System, running on {0} Scheme"
                    (string-titlecase (symbol->string (scheme-dialect))))))
 
-  (define (channel-days-tds base-url year tag channel days prop-vec . args)
+  (define (channel-days-tds base-url tag channel days prop-vec . args)
     (let-optionals* args ((start 0)
                           (end (vector-length days))
                           (with-day? #f))
       (let ()
         (define (text day count)
           (cond ((and with-day? count)
-                 (ssubst "{0} ({1})" (cadr day) count))
+                 (ssubst "{0} ({1})" (caddr day) count))
                 (with-day?
-                  (ssubst "{0}" (cadr day)))
+                  (ssubst "{0}" (caddr day)))
                 (count
                  (ssubst "({0})" count))
                 (else
@@ -281,7 +281,7 @@
         (define (day-td day props)
           `(td ,(cond ((assq-ref props 'message-count)
                        => (lambda (count)
-                            (day-link base-url year tag channel day (text day (car count)))))
+                            (day-link base-url tag channel day (text day (car count)))))
                       (else
                        (text day #f)))))
         (let loop ((markup '()) (i (- end 1)))
@@ -298,24 +298,24 @@
         (cond ((< i start)
                (cons (cur-borders) borders))
               ((not cur-month)
-               (loop borders (car (vector-ref days i)) end-i (- i 1)))
-              ((= cur-month (car (vector-ref days i)))
+               (loop borders (cadr (vector-ref days i)) end-i (- i 1)))
+              ((= cur-month (cadr (vector-ref days i)))
                (loop borders cur-month end-i (- i 1)))
               (else
-               (loop (cons (cur-borders) borders) (car (vector-ref days i)) i (- i 1)))))))
+               (loop (cons (cur-borders) borders) (cadr (vector-ref days i)) i (- i 1)))))))
 
-  (define (render-channel-overview/html base-url year tag channel days prop-vec)
+  (define (render-channel-overview/html base-url tag channel days prop-vec)
     `((h1 ,(breadcrumbs base-url tag channel #f))
       ,@(append-map
          (lambda (month-borders)
-           (let ((month (car (vector-ref days (car month-borders)))))
+           (receive (year month day) (apply values (vector-ref days (car month-borders)))
              (list `(h2 ,(month-string year month))
-                   (channel-monthly-table base-url year tag channel 10 days prop-vec
+                   (channel-monthly-table base-url tag channel 10 days prop-vec
                                           (car month-borders) (cdr month-borders)))))
          (days-month-borders days))))
 
 
-  (define (channel-monthly-table base-url year tag channel n-columns days prop-vec start end)
+  (define (channel-monthly-table base-url tag channel n-columns days prop-vec start end)
     `(table
       (^ (class "mactivity"))
       ,@(let loop ((markup '()) (i start))
@@ -324,7 +324,7 @@
               (let* ((n-vals (min n-columns (- end i)))
                      (n-empty (- n-columns n-vals)))
                 (loop (append
-                       `((tr ,@(channel-days-tds base-url year tag channel days prop-vec
+                       `((tr ,@(channel-days-tds base-url tag channel days prop-vec
                                                  i (+ i n-vals) #t)
                              ,@(make-list n-empty '(td))))
                        markup)
@@ -355,10 +355,11 @@
   (define (channel-link base-url tag channel)
     `(a (^ (href ,(url-escape (string-append base-url tag "/" channel "/")))) ,channel))
 
-  (define (day-link base-url year tag channel day text)
-    `(a (^ (href ,(url-escape (ssubst "{0}{2}/{3}/{1}-{4}-{5}/"
-                                      base-url year tag channel (car day) (cadr day)))))
-        ,text))
+  (define (day-link base-url tag channel day text)
+    (receive (year month day) (apply values day)
+      `(a (^ (href ,(url-escape (ssubst "{0}{2}/{3}/{1}-{4}-{5}/"
+                                        base-url year tag channel month day))))
+          ,text)))
 
   (define url-escape
     (let ((safe-cs (char-set-union char-set:letter
@@ -399,31 +400,39 @@
                             #f)))))
                state))
 
-  (define (state-tabularize year state)
+  (define (state-tabularize state)
     (receive (min-date max-date)
-             (let loop ((min-date #f) (max-date #f) (dates (state-dates state 3)))
+             (let loop ((min-date #f) (max-date #f) (dates (state-dates state)))
                (if (null? dates)
                    (values min-date max-date)
                    (loop (list-select < = min-date (car dates))
                          (list-select > = max-date (car dates))
                          (cdr dates))))
       (let ((days (if (and min-date max-date)
-                      (list->vector (days-between year min-date max-date))
+                      (list->vector (days-between min-date max-date))
                       '#())))
-        (values days
-                (map (lambda (entry)
-                       (receive (head tail) (split-at entry 3)
-                         (append head (list (alist->day-vector tail days)))))
-                     state)))))
+        (let loop ((channels '()) (state state))
+          (if (null? state)
+              (values days (reverse channels))
+              (let*-values (((head days-alist) (split-at (car state) 3))
+                            ((year tag channel) (apply values head)))
+                (cond ((assoc-ref channels (list tag channel))
+                       => (lambda (entry)
+                            (fill-day-vector! (car entry) days year days-alist)
+                            (loop channels (cdr state))))
+                      (else
+                       (let ((day-vec (make-vector (vector-length days) '())))
+                         (fill-day-vector! day-vec days year days-alist)
+                         (loop (cons (list (list tag channel) day-vec) channels)
+                               (cdr state)))))))))))
 
-  (define (alist->day-vector alist days)
-    (let ((vec (make-vector (vector-length days) '())))
-      (do ((alist alist (cdr alist)))
-          ((null? alist) vec)
-        (let ((index (vector-binary-search days (caar alist) (list-comparator > =))))
-          (unless index
-            (error 'alist->day-vector "out-of-range date encountered" (car alist) days))
-          (vector-set! vec index (cdar alist))))))
+  (define (fill-day-vector! vec days year days-alist)
+    (do ((alist days-alist (cdr alist)))
+        ((null? alist) vec)
+      (let ((index (vector-binary-search days (cons year (caar alist)) (list-comparator > =))))
+        (unless index
+          (error 'fill-day-vector! "out-of-range date encountered" (car alist) days))
+        (vector-set! vec index (cdar alist)))))
 
   (define (list-comparator less? equiv?)
     (lambda (l1 l2)
@@ -447,28 +456,28 @@
             ((equiv? (car l1) (car l2)) (loop (cdr l1) (cdr l2)))
             (else                        1))))
 
-  (define (state-dates state split)
+  (define (state-dates state)
     (append-map (lambda (entry)
-                  (map car (drop entry split)))
+                  (let ((year (car entry)))
+                    (map (lambda (day/props)
+                           (cons year (car day/props)))
+                         (drop entry 3))))
                 state))
 
   (define *one-day* (make-time time-duration 0 (* 24 60 60)))
 
-  (define (days-between year start-day end-day)
-    (let ((start (date->time-utc (make-date 0 0 0 0 (cadr start-day) (car start-day) year 0)))
-          (end (add-duration
-                (date->time-utc (make-date 0 0 0 0 (cadr end-day) (car end-day) year 0))
-                *one-day*)))
+  (define (days-between start-day end-day)
+    (define (day->time-utc day)
+      (date->time-utc (make-date 0 0 0 0 (caddr day) (cadr day) (car day) 0)))
+    (let ((start (day->time-utc start-day))
+          (end (add-duration (day->time-utc end-day) *one-day*)))
       (let loop ((cur start) (days '()))
         (if (time>=? cur end)
             days
             (let ((cur-date (time-utc->date cur 0)))
               (loop (add-duration cur *one-day*)
-                    (cons (list (date-month cur-date) (date-day cur-date))
+                    (cons (list (date-year cur-date) (date-month cur-date) (date-day cur-date))
                           days)))))))
-
-  (define (activity-nav-links date n-days)
-    `(br))
 
   (define (sexp->matcher expr)
     (define (submatcher mapper)
@@ -511,6 +520,46 @@
           (else
            '())))
 
+  (define (date+days->time-utc date n-days)
+    (let ((step (time-* n-days *one-day*)))
+      (add-duration (date->time-utc date) step)))
+
+  (define (date-with-zone-offset date tz-offset)
+    (make-date (date-nanosecond date)
+               (date-second date)
+               (date-minute date)
+               (date-hour date)
+               (date-day date)
+               (date-month date)
+               (date-year date)
+               tz-offset))
+
+  (define (query-date query)
+    (let ((val (assq-ref query 'date)))
+      (and val
+           (irregex-match isodate-rx val)
+           (date-with-zone-offset (string->date val isodate-fmt) 0))))
+
+  (define isodate-fmt "~Y-~m-~d")
+  (define isodate-rx (irregex '(: (>= 4 digit) "-" (** 1 2 digit) "-" (** 1 2 digit))))
+
+  (define (time-* n time)
+    (make-time (time-type time) (* n (time-nanosecond time)) (* n (time-second time))))
+
+  (define (mk-date year month day)
+    (make-date 0 0 0 0 day month year 0))
+
+  (define (date+days date n-days)
+    (time-utc->date (date+days->time-utc date n-days) 0))
+
+  (define (isodate-str date)
+    (date->string date isodate-fmt))
+
+  (define (sign x)
+    (cond ((< x 0) -1)
+          ((= x 0)  0)
+          (else     1)))
+
   (define (ssubst fmt . args)
     (string-substitute #f fmt args 'braces))
 
@@ -533,7 +582,8 @@
 
   (define-privates
     %set-log-dir! %set-state-dir! %set-dir-struct! %get-state %set-base-url!
-    %matcher %set-matcher!)
+    %matcher %set-matcher!
+    %activity-nav-links)
 
   (define *irclogs* (*the-root-object* 'clone))
 
@@ -551,43 +601,46 @@
                 options)
       logs))
 
-  (define-method (*irclogs* 'render-overview/html self resend year tag channel)
-    (let ((base-url (self 'base-url))
-          (state (self %get-state year tag channel)))
+  (define-method (*irclogs* 'render-overview/html self resend tag channel query)
+    (let* ((base-url (self 'base-url))
+           (base-date (or (query-date query) (current-date 0)))
+           (n-days (cond ((and tag channel) 365)
+                         (else                7)))
+           (state (self %get-state tag channel base-date n-days)))
       (receive (days rows)
-               (state-tabularize year
-                                 (state-sort `((1 ,string<? ,string=?)
-                                               (2 ,string<? ,string=?))
+               (state-tabularize (state-sort `((1 ,string<? ,string=?)
+                                               (2 ,string<? ,string=?)
+                                               (0 ,string<? ,string=?))
                                              state))
         (let ((n-rows (length rows)))
           (cond ((= n-rows 0)
                  #f)
-                ((and year tag channel)
+                ((and tag channel)
                  (assert (= n-rows 1))
-                 (let ((row (car rows)))
-                   (render-channel-overview/html base-url year tag channel days (cadddr row))))
+                 (render-channel-overview/html base-url tag channel days (cadar rows)))
                 (else
                  (let ((n-days (min 7 (vector-length days))))
-                   `((h1 ,(breadcrumbs base-url tag channel #f))
-                     ,(activity-nav-links year n-days)
-                     (table
-                      (^ (class "activity"))
-                      (thead
-                       (tr (th "Network") (th "Channel")
-                           ,@(map (lambda (day)
-                                    `(th ,(ssubst "{0}-{1}" (car day) (cadr day))))
-                                  (vector->list days 0 n-days))))
-                      (tbody
-                       ,@(map (lambda (row)
-                                (let ((year (car row))
-                                      (tag (cadr row))
-                                      (channel (caddr row)))
-                                  `(tr (th ,(tag-link base-url tag))
-                                       (th ,(channel-link base-url tag channel))
-                                       ,@(channel-days-tds base-url year tag channel days
-                                                           (cadddr row) 0 n-days))))
-                              rows)))
-                     ,(footer)))))))))
+                   (and (> n-days 0)
+                        `((h1 ,(breadcrumbs base-url tag channel #f))
+                          ,(self %activity-nav-links tag channel
+                                 (or (query-date query) (current-date 0)) n-days 7)
+                          (table
+                           (^ (class "activity"))
+                           (thead
+                            (tr (th "Network") (th "Channel")
+                                ,@(map (lambda (date)
+                                         (receive (year month day) (apply values date)
+                                           `(th ,(ssubst "{0}-{1}" month day))))
+                                       (vector->list days 0 n-days))))
+                           (tbody
+                            ,@(map (lambda (row)
+                                     (receive (tag channel) (apply values (car row))
+                                       `(tr (th ,(tag-link base-url tag))
+                                            (th ,(channel-link base-url tag channel))
+                                            ,@(channel-days-tds base-url tag channel days
+                                                                (cadr row) 0 n-days))))
+                                   rows)))
+                          ,(footer))))))))))
 
   (define-method (*irclogs* 'render-log/html self resend tag channel date)
     (receive (year month day) (parse-date date)
@@ -635,30 +688,59 @@
           (lambda (port)
             (write (date->string (current-date 0) date-fmt) port))))))
 
-  (define-method (*irclogs* %get-state self resend year tag channel)
-    (let ((state-dir (self 'state-dir)))
+  (define-method (*irclogs* %get-state self resend tag channel base-date n-days)
+    (let* ((start-time (date+days->time-utc base-date (- n-days)))
+           (start-date (time-utc->date start-time 0))
+           (end-time (date->time-utc base-date))
+           (end-date base-date)
+           (state-dir (self 'state-dir)))
+      (define (date-match? year)
+        (or (eqv? base-date #f) (<= (date-year base-date) year (date-year end-date))))
+      (define (filter-days year entries)
+        (if (not base-date)
+            entries
+            (filter (lambda (entry)
+                      (receive (month day) (apply values (car entry))
+                        (let ((entry-time (date->time-utc (mk-date year month day))))
+                          (and (time<=? start-time entry-time)
+                               (time<=? entry-time end-time)))))
+                    entries)))
       (if (file-exists? state-dir)
-          (directory-fold state-dir
-                          (lambda (entry state)
-                            (if (and (pathname-has-type? entry "state")
-                                     (file-readable? entry))
-                                (receive (st-year st-tag st-channel) (parse-state-pathname entry)
-                                  (if (and st-year st-tag st-channel
-                                           (or (eqv? year #f) (= year st-year))
-                                           (or (eqv? tag #f)  (string=? tag st-tag))
-                                           (or (eqv? channel #f) (string=? channel st-channel))
-                                           ((self %matcher) `((year . ,st-year)
-                                                              (tag . ,st-tag)
-                                                              (channel . ,st-channel))))
-                                      (let ((entries
-                                             (call-with-input-file (x->namestring entry) read)))
-                                        (cons (cons* st-year st-tag st-channel entries) state))
-                                      state))
-                                state))
-                          '())
+          (directory-fold
+           state-dir
+           (lambda (entry state)
+             (if (and (pathname-has-type? entry "state")
+                      (file-readable? entry))
+                 (receive (st-year st-tag st-channel) (parse-state-pathname entry)
+                   (if (and st-year st-tag st-channel
+                            (date-match? st-year)
+                            (or (eqv? tag #f)  (string=? tag st-tag))
+                            (or (eqv? channel #f) (string=? channel st-channel))
+                            ((self %matcher) `((year . ,st-year)
+                                               (tag . ,st-tag)
+                                               (channel . ,st-channel))))
+                       (let ((entries
+                              (filter-days st-year
+                                           (call-with-input-file (x->namestring entry) read))))
+                         (cons (cons* st-year st-tag st-channel entries) state))
+                       state))
+                 state))
+           '())
           (begin
             (create-directory* state-dir)
             '()))))
+
+  (define-method (*irclogs* %activity-nav-links self resend tag channel base-date n-days-shown step)
+    (let ((next-date (date+days base-date step))
+          (prev-date (date+days base-date (- n-days-shown)))
+          (loc (string-concatenate (append (if tag (list tag "/") '())
+                                           (if channel (list channel "/"))))))
+      (define (date-link date text)
+        (let ((url (ssubst "{0}{1}?date={2}" (self 'base-url) loc (isodate-str date))))
+          `(a (^ (href ,url)) ,text)))
+      `(div (^ (id "nav"))
+            ,(date-link next-date "<<")
+            ,(date-link prev-date ">>"))))
 
   (*irclogs* 'add-value-slot! 'log-dir %set-log-dir! (make-pathname #f '() #f))
   (*irclogs* 'add-value-slot! 'state-dir %set-state-dir! (make-pathname #f '() #f))
