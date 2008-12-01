@@ -41,6 +41,7 @@
         (fmt)
         (sxml simple)
         (sxml transform)
+        (sbank gobject)
         (sbank soup)
         (sbank typelib)
         (sbank ctypes basic)
@@ -176,22 +177,23 @@
 (define (wrap-handler handler)
   ;; Note that `user-data' will go away when I get around to implement hiding it
   (lambda (server msg path query client user-data)
-    (let ((method (send msg (get 'method))))
-      (println "{0} {1} HTTP/1.{2}" method  path (send msg (get 'http-version)))
+    (let ((method (send msg (get 'method)))
+          (query-alist (map (lambda (e)
+                              (cons (string->symbol (car e)) (cdr e)))
+                            (ghash->alist query))))
+      (println "{0} {1} {2} HTTP/1.{3}" method path query-alist (send msg (get 'http-version)))
       (send (send msg (get-request-headers))
         (foreach (lambda (name value user-data)
                    (println "{0}: {1}" name value))))
       (let ((body (send msg (get-request-body))))
         (when (> (send body (get-length)) 0)
           (println (send body (get-data)))))
-      (let ((ready? (handler server msg path query)))
-        (println "ready: {0}" ready?)
-        (cond
-         (ready?
-          (println " -> {0} {1}" (send msg (get 'status-code)) (send msg (get 'reason-phrase))))
-         (else
-          (send server (pause-message msg))
-          (println " -> deferred")))))))
+      (cond
+       ((handler server msg path query-alist)
+        (println " -> {0} {1}" (send msg (get 'status-code)) (send msg (get 'reason-phrase))))
+       (else
+        (send server (pause-message msg))
+        (println " -> deferred"))))))
 
 (define (msg-method msg)
   (string->symbol (string-downcase (send msg (get 'method)))))
@@ -218,7 +220,7 @@
                 (task (lambda (i)
                         (fprintf port "count: {0}<br/>" i)
                         (yield #t)))
-                (fprintf port "Successfully counted from 0 to {0} in {1} seconds.</br>"
+                (fprintf port "Successfully counted from 0 to {0} in {1} seconds.<br/>"
                          (- n 1) (fmt #f (num (inexact (timer)) 10 4)))))))))))
 
 (define (counter-page-renderer query)
