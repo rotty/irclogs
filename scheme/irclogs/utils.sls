@@ -92,9 +92,9 @@
                         (apply values #f results))))
             (if engine-succeeded?
                 (apply success results)
-                (failure 
-                 (make-engine 
-                  (lambda (yield) 
+                (failure
+                 (make-engine
+                  (lambda (yield)
                     (resume 'resume)))
                  (apply values results))))))))
 
@@ -111,10 +111,10 @@
 
   (define (scheduler-has-work? scheduler)
     (not (queue-empty? (scheduler-tasks scheduler))))
-  
+
   (define (scheduler-enqueue! scheduler proc)
     (scheduler-tasks-set! scheduler
                           (queue-insert (scheduler-tasks scheduler)
                                         (make-engine proc))))
-  
+
   )
