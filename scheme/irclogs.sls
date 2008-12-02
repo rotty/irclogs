@@ -311,7 +311,8 @@
         (define (day-td day props)
           `(td ,(cond ((assq-ref props 'message-count)
                        => (lambda (count)
-                            (day-link base-url tag channel day (text day (car count)))))
+                            (day-link base-url tag channel (apply mk-date day)
+                                      (text day (car count)))))
                       (else
                        (text day #f)))))
         (let loop ((markup '()) (i (- end 1)))
@@ -418,14 +419,13 @@
     `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}/" base-url tag channel date-str) "/")))
           ,date-str))
 
-  (define (day-link base-url tag channel day text)
-    (receive (year month day) (apply values day)
-      `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}-{4}-{5}/"
-                                        base-url
-                                        tag channel
-                                        (num->str year 4) (num->str month 2) (num->str day 2))
-                                "/")))
-          ,text)))
+  (define (day-link base-url tag channel date text)
+    `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}/"
+                                      base-url
+                                      tag channel
+                                      (isodate-str date))
+                              "/")))
+        ,text))
 
   (define url-escape
     (let ((safe-cs (char-set-union char-set:letter
