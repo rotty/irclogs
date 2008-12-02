@@ -695,7 +695,7 @@
                         (else                7))))
       (cond
        ((and tag channel (assq-ref query 'q))
-        => (lambda (q) (self %render-search-task tag channel base-date n-days (q->matcher q))))
+        => (lambda (q) (self %render-search-task tag channel base-date 14 (q->matcher q))))
        (else
         (let ((state (self %get-state tag channel base-date n-days)))
           (receive (days rows)
