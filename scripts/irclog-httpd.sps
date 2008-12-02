@@ -475,16 +475,6 @@
      (list-ref colors (list-ref nb 1))
      (list-ref colors (list-ref nb 2)))))
 
-(define (println fmt . args)
-  (string-substitute #t fmt args 'braces)
-  (newline))
-
-(define (ssubst fmt . args)
-  (string-substitute #f fmt args 'braces))
-
-(define (fprintf port fmt . args)
-  (string-substitute port fmt args 'braces))
-
 (define (bail-out msg . args)
   (string-substitute (current-error-port) msg args)
   (newline (current-error-port)))

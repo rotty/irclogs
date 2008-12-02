@@ -26,14 +26,16 @@
           current-yield yield/c
 
           make-scheduler scheduler? scheduler-work scheduler-enqueue!
-          scheduler-has-work?)
+          scheduler-has-work?
+
+           ssubst fprintf println)
   (import (rnrs)
           (spells receive)
           (spells opt-args)
           (spells queue)
           (spells time-lib)
           (spells parameter)
-          (only (spells assert) cout)
+          (spells string-substitute)
           (spells tracing))
 
   (define (make-timer)
@@ -123,5 +125,15 @@
     (scheduler-tasks-set! scheduler
                           (queue-insert (scheduler-tasks scheduler)
                                         (make-engine proc))))
+
+  (define (println fmt . args)
+    (string-substitute #t fmt args 'braces)
+    (newline))
+
+  (define (ssubst fmt . args)
+    (string-substitute #f fmt args 'braces))
+
+  (define (fprintf port fmt . args)
+    (string-substitute port fmt args 'braces))
 
   )

@@ -23,7 +23,8 @@
           (spells tracing)
           (fmt)
           (prometheus)
-          (irclogs parse))
+          (irclogs parse)
+          (irclogs utils))
 
   (define (merge-state state changed-logs)
     (let ((changed-days (map car changed-logs)))
@@ -610,13 +611,6 @@
     (cond ((< x 0) -1)
           ((= x 0)  0)
           (else     1)))
-
-  (define (ssubst fmt . args)
-    (string-substitute #f fmt args 'braces))
-
-  (define (println fmt . args)
-    (string-substitute #t fmt args 'braces)
-    (newline))
 
 ;;; Code following uses the Prometheus object system
 
