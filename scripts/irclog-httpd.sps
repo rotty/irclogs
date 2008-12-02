@@ -235,7 +235,8 @@
   (receive (port flush) (make-soup-output-port+flusher (send msg (get-response-body)))
     (let* ((http-version (send msg (get 'http-version)))
            (last-proc #f)
-           (go-on #f)
+           (output-k #f)
+           (work-k #f)
            (escape #f)
            (tasks-done? #f)
            (message-done? #f)
@@ -248,7 +249,7 @@
                                        (lambda (port)
                                          (call/cc
                                           (lambda (k)
-                                            (set! go-on k)
+                                            (set! output-k k)
                                             (defer title msg
                                               (lambda (yield)
                                                 (parameterize ((current-yield
@@ -260,15 +261,12 @@
                                                                          (flush)
                                                                          (yield v))))))
                                                   (proc port))
-                                                (if (eq? decorated last-proc)
-                                                    (lambda ()
-                                                      (let ((cont go-on))
-                                                        (call/cc
-                                                         (lambda (k)
-                                                           (set! go-on k)
-                                                           (set! tasks-done? #t)
-                                                           (cont)))))
-                                                    go-on)))
+                                                (lambda ()
+                                                  (call/cc
+                                                   (lambda (k)
+                                                     (set! work-k k)
+                                                     (set! tasks-done? (eq? decorated last-proc))
+                                                     (output-k))))))
                                             (escape))))))
                                (set! last-proc decorated)
                                decorated)))
@@ -295,7 +293,7 @@
           (flush))
         (cond ((and last-proc tasks-done?)
                (close-output-port tport)
-               (go-on))     ; here we escape back into the idle worker
+               (work-k))     ; here we escape back into the idle worker
               ((or (not last-proc) first-escape?)
                (set! first-escape? #f)
                (when (not last-proc)
@@ -306,7 +304,11 @@
                ;; using HTTP 1.0 and there was a task involved
                ;; (as HTTP 1.0 doesn't support chunked
                ;; encoding)
-               (not (and (= http-version 0) last-proc))))))))
+               (not (and (= http-version 0) last-proc)))
+              (else
+               ;; we have some not-finished tasks, and it's not the
+               ;; first escape
+               (work-k)))))))
 
 (define (handle-page base-url msg code title defer proc . args)
   (let ((method (msg-method msg)))
