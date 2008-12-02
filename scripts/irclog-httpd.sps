@@ -215,11 +215,11 @@
        (^ (align "center"))
        (h1 ,(ssubst "Counting up to {0} (starting at 0)" (- n 1)))
        (p (task
-           ,(lambda (port yield)
+           ,(lambda (port)
               (let ((timer (start-timer)))
                 (task (lambda (i)
                         (fprintf port "count: {0}<br/>" i)
-                        (yield #t)))
+                        (yield/c #t)))
                 (fprintf port "Successfully counted from 0 to {0} in {1} seconds.<br/>"
                          (- n 1) (fmt #f (num (inexact (timer)) 10 4)))))))))))
 
@@ -230,87 +230,95 @@
   "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"
     \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">")
 
+
+(define (handle-sxml-page  base-url msg code title defer sxml)
+  (receive (port flush) (make-soup-output-port+flusher (send msg (get-response-body)))
+    (let* ((http-version (send msg (get 'http-version)))
+           (last-proc #f)
+           (go-on #f)
+           (escape #f)
+           (tasks-done? #f)
+           (message-done? #f)
+           (first-escape? #t)
+           (sxml (pre-post-order
+                  sxml
+                  `((task *PREORDER* .
+                          ,(lambda (tag proc)
+                             (letrec ((decorated
+                                       (lambda (port)
+                                         (call/cc
+                                          (lambda (k)
+                                            (set! go-on k)
+                                            (defer title msg
+                                              (lambda (yield)
+                                                (parameterize ((current-yield
+                                                                (lambda (v)
+                                                                  (cond (message-done?
+                                                                         (yield 'cancelled))
+                                                                        (else
+                                                                         (flush-output-port port)
+                                                                         (flush)
+                                                                         (yield v))))))
+                                                  (proc port))
+                                                (if (eq? decorated last-proc)
+                                                    (lambda ()
+                                                      (let ((cont go-on))
+                                                        (call/cc
+                                                         (lambda (k)
+                                                           (set! go-on k)
+                                                           (set! tasks-done? #t)
+                                                           (cont)))))
+                                                    go-on)))
+                                            (escape))))))
+                               (set! last-proc decorated)
+                               decorated)))
+                    (*DEFAULT* . ,list)))))
+
+      (when (> http-version 0)
+        (send (send msg (get-response-body))
+          (set-accumulate #f)))
+
+      (when (and last-proc (> http-version 0))
+        (send (send msg (get-response-headers))
+          (set-encoding 'chunked))
+        (send msg (connect 'finished (lambda (msg)
+                                       (set! message-done? #t)))))
+
+      (let ((tport (transcoded-port port (make-transcoder (utf-8-codec)))))
+        (put-string tport xhtml-doctype)
+        (call/cc
+         (lambda (k)
+           (set! escape k)
+           (xhtml-page tport base-url title sxml)))
+        (unless message-done?
+          (flush-output-port tport)
+          (flush))
+        (cond ((and last-proc tasks-done?)
+               (close-output-port tport)
+               (go-on))     ; here we escape back into the idle worker
+              ((or (not last-proc) first-escape?)
+               (set! first-escape? #f)
+               (when (not last-proc)
+                 (close-output-port tport))
+               (send msg (set-status (soup-status 'ok)))
+               ;; return wether the message is ready to be
+               ;; sent, which is always the case, except when
+               ;; using HTTP 1.0 and there was a task involved
+               ;; (as HTTP 1.0 doesn't support chunked
+               ;; encoding)
+               (not (and (= http-version 0) last-proc))))))))
+
 (define (handle-page base-url msg code title defer proc . args)
-  (let ((method (msg-method msg))
-        (resp-body (send msg (get-response-body)))
-        (http-version (send msg (get 'http-version))))
-    (receive (port flush) (make-soup-output-port+flusher resp-body)
-      (case method
-        ((get head)
-         (add-response-headers! msg '("Content-Type" . "text/html; charset=utf-8"))
-         (case method
-           ((get)
-            (when (> http-version 0)
-              (send resp-body (set-accumulate #f)))
-            (let* ((last-proc #f)
-                   (go-on #f)
-                   (escape #f)
-                   (tasks-done? #f)
-                   (message-done? #f)
-                   (first-escape? #t)
-                   (sxml (pre-post-order
-                          (apply proc args)
-                          `((task *PREORDER* .
-                                  ,(lambda (tag proc)
-                                     (letrec ((decorated
-                                               (lambda (port)
-                                                 (call/cc
-                                                  (lambda (k)
-                                                    (set! go-on k)
-                                                    (defer title msg
-                                                      (lambda (yield)
-                                                        (proc port
-                                                              (lambda (v)
-                                                                (cond (message-done?
-                                                                       (yield 'cancelled))
-                                                                      (else
-                                                                       (flush-output-port port)
-                                                                       (flush)
-                                                                       (yield v)))))
-                                                        (if (eq? decorated last-proc)
-                                                            (lambda ()
-                                                              (let ((cont go-on))
-                                                                (call/cc
-                                                                 (lambda (k)
-                                                                   (set! go-on k)
-                                                                   (set! tasks-done? #t)
-                                                                   (cont)))))
-                                                            go-on)))
-                                                    (escape))))))
-                                       (set! last-proc decorated)
-                                       decorated)))
-                            (*DEFAULT* . ,list)))))
-              (when (and last-proc (> http-version 0))
-                (send (send msg (get-response-headers))
-                  (set-encoding 'chunked))
-                (send msg (connect 'finished (lambda (msg)
-                                               (set! message-done? #t)))))
-              (let ((tport (transcoded-port port (make-transcoder (utf-8-codec)))))
-                (put-string tport xhtml-doctype)
-                (call/cc
-                 (lambda (k)
-                   (set! escape k)
-                   (xhtml-page tport base-url title sxml)))
-                (unless message-done?
-                  (flush-output-port tport)
-                  (flush))
-                (cond ((and last-proc tasks-done?)
-                       (close-output-port tport)
-                       (go-on)) ; here we escape back into the idle worker
-                      ((or (not last-proc) first-escape?)
-                       (set! first-escape? #f)
-                       (when (not last-proc)
-                         (close-output-port tport))
-                       (send msg (set-status (soup-status 'ok)))
-                       ;; return wether the message is ready to be
-                       ;; sent, which is always the case, except when
-                       ;; using HTTP 1.0 and there was a task involved
-                       ;; (as HTTP 1.0 doesn't support chunked
-                       ;; encoding)
-                       (not (and (= http-version 0) last-proc)))))))))
-            (else
-             (send msg (set-status (soup-status 'not-implemented)))
-             #t)))))
+  (let ((method (msg-method msg)))
+    (case method
+      ((get head)
+       (add-response-headers! msg '("Content-Type" . "text/html; charset=utf-8"))
+       (case method
+         ((get)
+          (handle-sxml-page base-url msg code title defer (apply proc args)))
+         (else
+          (send msg (set-status (soup-status 'not-implemented)))
+          #t))))))
 
 (define (irclogs-handler defer irclogs)
   (define (invoke msg-name)

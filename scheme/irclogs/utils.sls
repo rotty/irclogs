@@ -23,6 +23,7 @@
 
 (library (irclogs utils)
   (export make-timer start-timer
+          current-yield yield/c
 
           make-scheduler scheduler? scheduler-work scheduler-enqueue!
           scheduler-has-work?)
@@ -31,6 +32,7 @@
           (spells opt-args)
           (spells queue)
           (spells time-lib)
+          (spells parameter)
           (only (spells assert) cout)
           (spells tracing))
 
@@ -58,6 +60,11 @@
     (let ((timer (make-timer)))
       (timer 'start)
       timer))
+
+  (define current-yield (make-parameter #f))
+
+  (define (yield/c v)
+    ((current-yield) v))
 
   (define-record-type scheduler
     (fields
