@@ -370,15 +370,15 @@
                        markup)
                       (+ i n-columns)))))))
 
-  (define (log-search-task log-opener)
-    (lambda (port)
-      (and-let* ((log-port (log-opener)))
-        (call-with-port log-port
-          (trace-lambda search-log (log-port)
-            (fold-log-file/shtml log-port
-                                 (lambda (shtml ignore) (sxml->xml shtml port))
-                                 #f)))
-        (yield/c #t))))
+  (define (log-search-task heading port log-port)
+    (fold-log-file/shtml log-port
+                         (lambda (shtml first?)
+                           (when first?
+                             (sxml->xml `(tr (th (^ (colspan 2)) ,heading)) port))
+                           (sxml->xml shtml port)
+                           #f)
+                         #t)
+    (yield/c #t))
 
   (define breadcrumbs
     (case-lambda
@@ -824,18 +824,23 @@
             (transcoded-port (open-file-input-port (x->namestring path)) (native-transcoder))))))
 
   (define-method (*irclogs* %render-search-task self resend tag channel base-date n-days q)
-    `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
-      ,@(fold-days-between
-         (date+days base-date (- n-days))
-         base-date
-         (lambda (date markup)
-           (append
-            `((h2 ,(isodate-str date))
-              (table (^ (class "log"))
-                     (task ,(log-search-task (lambda ()
-                                               (self 'open-log-file tag channel date))))))
-            markup))
-         '())))
+    (let ((base-url (self 'base-url)))
+      `((h1 ,(breadcrumbs  tag channel #f #t))
+        (table
+         (^ (class "log"))
+         (task ,(lambda (port)
+                  (fold-days-between
+                   base-date
+                   (date+days base-date (- n-days))
+                   (lambda (date ignore)
+                     (and-let* ((log-port (self 'open-log-file tag channel date)))
+                       (log-search-task
+                        (day-link base-url tag channel date (isodate-str date))
+                        port
+                        log-port))
+                     #f)
+                   #f))))
+        ,(footer))))
 
   (define-method (*irclogs* %activity-nav-links self resend tag channel base-date n-days-shown step)
     (let ((next-date (date+days base-date step))
