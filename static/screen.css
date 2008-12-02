@@ -53,6 +53,12 @@ a img {
     padding-right: 1em;
 }
 
+#timing {
+    text-align: center;
+    padding: 1em;
+    font-style: italic;
+}
+
 #foot {
     padding: 1em;
     font-size: small;
@@ -67,6 +73,11 @@ a img {
 table.log {
     margin-left: auto;
     margin-right: auto;
+}
+
+table.log th {
+    padding: 2em;
+    font-size: larger;
 }
 
 table.activity {

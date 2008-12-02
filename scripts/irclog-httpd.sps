@@ -238,39 +238,48 @@
            (output-k #f)
            (work-k #f)
            (escape #f)
+           (task-result #f)
            (tasks-done? #f)
            (message-done? #f)
            (first-escape? #t)
-           (sxml (pre-post-order
-                  sxml
-                  `((task *PREORDER* .
-                          ,(lambda (tag proc)
-                             (letrec ((decorated
-                                       (lambda (port)
-                                         (call/cc
-                                          (lambda (k)
-                                            (set! output-k k)
-                                            (defer title msg
-                                              (lambda (yield)
-                                                (parameterize ((current-yield
-                                                                (lambda (v)
-                                                                  (cond (message-done?
-                                                                         (yield 'cancelled))
-                                                                        (else
-                                                                         (flush-output-port port)
-                                                                         (flush)
-                                                                         (yield v))))))
-                                                  (proc port))
-                                                (lambda ()
-                                                  (call/cc
-                                                   (lambda (k)
-                                                     (set! work-k k)
-                                                     (set! tasks-done? (eq? decorated last-proc))
-                                                     (output-k))))))
-                                            (escape))))))
-                               (set! last-proc decorated)
-                               decorated)))
-                    (*DEFAULT* . ,list)))))
+           (sxml
+            (pre-post-order
+             sxml
+             `((task *PREORDER* .
+                     ,(lambda (tag proc)
+                        (define (decorated port)
+                          (call/cc
+                           (lambda (k)
+                             (set! output-k k)
+                             (defer title msg
+                               (lambda (yield)
+                                 (set! task-result
+                                       (parameterize ((current-yield
+                                                       (lambda (v)
+                                                         (cond (message-done?
+                                                                (yield 'cancelled))
+                                                               (else
+                                                                (flush-output-port port)
+                                                                (flush)
+                                                                (yield v))))))
+                                         (proc port)))
+                                 (lambda ()
+                                   (call/cc
+                                    (lambda (k)
+                                      (set! work-k k)
+                                      (set! tasks-done? (eq? decorated last-proc))
+                                      (output-k))))))
+                             (escape))))
+                        (set! last-proc decorated)
+                        decorated))
+               (task-result *PREORDER* .
+                            ,(lambda (tag)
+                               (lambda (port)
+                                 (cond ((procedure? task-result)
+                                        (task-result port))
+                                       (task-result
+                                        (sxml->xml task-result port))))))
+               (*DEFAULT* . ,list)))))
 
       (when (> http-version 0)
         (send (send msg (get-response-body))
