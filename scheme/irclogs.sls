@@ -322,8 +322,18 @@
               (else
                (loop (cons (cur-borders) borders) (cadr (vector-ref days i)) i (- i 1)))))))
 
+  (define (search-form base-url tag channel)
+    (let ((title (ssubst "Search {0}/{1}" tag channel)))
+      `(form (^ (id "search")
+                (action ,(url-escape (ssubst "{0}{1}/{2}/" base-url tag channel) "/"))
+                (accept-charset "utf-8"))
+             (input (^ (name "q") (title ,title) (size 42) (maxlength 2048)))
+             (br)
+             (input (^ (type "submit") (name "search-btn") (value ,title))))))
+
   (define (render-channel-overview/html base-url tag channel days prop-vec)
     `((h1 ,(breadcrumbs base-url tag channel #f))
+      ,(search-form base-url tag channel)
       ,@(append-map
          (lambda (month-borders)
            (receive (year month day) (apply values (vector-ref days (car month-borders)))
@@ -332,6 +342,9 @@
                                           (car month-borders) (cdr month-borders)))))
          (days-month-borders days))))
 
+  (define (render-search-task base-url tag channel q)
+    `((h1 ,(breadcrumbs base-url tag channel #f #t))
+      "Would search for: " ,q))
 
   (define (channel-monthly-table base-url tag channel n-columns days prop-vec start end)
     `(table
@@ -348,18 +361,28 @@
                        markup)
                       (+ i n-columns)))))))
 
-  (define (breadcrumbs base-url tag channel date)
-    (cond ((and tag channel date)
-           `(span ,(base-link base-url)
-                  " > " ,(tag-link base-url tag)
-                  " > " ,(channel-link base-url tag channel)
-                  " > " ,date))
-          ((and tag channel)
-           `(span ,(base-link base-url) " > " ,(tag-link base-url tag) " > " ,channel))
-          (tag
-           `(span ,(base-link base-url) " > " ,tag))
-          (else
-           "IRC activity for all networks")))
+  (define breadcrumbs
+    (case-lambda
+      ((base-url tag channel date link-last?)
+       (define (last-link link . args)
+         (if link-last?
+             (apply link args)
+             (last args)))
+       (cond ((and tag channel date)
+              `(span ,(base-link base-url)
+                     " > " ,(tag-link base-url tag)
+                     " > " ,(channel-link base-url tag channel)
+                     " > " ,(last-link date-link base-url tag channel date)))
+             ((and tag channel)
+              `(span ,(base-link base-url)
+                     " > " ,(tag-link base-url tag)
+                     " > " ,(last-link channel-link base-url tag channel)))
+             (tag
+              `(span ,(base-link base-url) " > " ,(last-link tag-link base-url tag)))
+             (else
+              "IRC activity for all networks")))
+      ((base-url tag channel date)
+       (breadcrumbs base-url tag channel date #f))))
 
   (define (month-string year month)
     (date->string (make-date 0 0 0 0 1 month year 0) "~B ~Y"))
@@ -373,12 +396,16 @@
   (define (channel-link base-url tag channel)
     `(a (^ (href ,(url-escape (string-append base-url tag "/" channel "/") "/"))) ,channel))
 
+  (define (date-link base-url tag channel date-str)
+    `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}/" base-url tag channel date-str) "/")))
+          ,date-str))
+
   (define (day-link base-url tag channel day text)
     (receive (year month day) (apply values day)
       `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}-{4}-{5}/"
                                         base-url
                                         tag channel
-                                        (num->str year 4) (num->str month 4) (num->str day 2))
+                                        (num->str year 4) (num->str month 2) (num->str day 2))
                                 "/")))
           ,text)))
 
@@ -610,6 +637,7 @@
     %get-state
     %set-base-url!
     %matcher %set-matcher!
+    %render-multi-overview/html
     %activity-nav-links
     %log-nav-links)
 
@@ -630,45 +658,53 @@
       logs))
 
   (define-method (*irclogs* 'render-overview/html self resend tag channel query)
-    (let* ((base-url (self 'base-url))
-           (base-date (or (query-date query) (current-date 0)))
-           (n-days (cond ((and tag channel) 365)
-                         (else                7)))
-           (state (self %get-state tag channel base-date n-days)))
-      (receive (days rows)
-               (state-tabularize (state-sort `((1 ,string<? ,string=?)
-                                               (2 ,string<? ,string=?)
-                                               (0 ,string<? ,string=?))
-                                             state))
-        (let ((n-rows (length rows)))
-          (cond ((= n-rows 0)
-                 #f)
-                ((and tag channel)
-                 (assert (= n-rows 1))
-                 (render-channel-overview/html base-url tag channel days (cadar rows)))
-                (else
-                 (let ((n-days (min 7 (vector-length days))))
-                   (and (> n-days 0)
-                        `((h1 ,(breadcrumbs base-url tag channel #f))
-                          ,(self %activity-nav-links tag channel
-                                 (or (query-date query) (current-date 0)) n-days 7)
-                          (table
-                           (^ (class "activity"))
-                           (thead
-                            (tr (th "Network") (th "Channel")
-                                ,@(map (lambda (date)
-                                         (receive (year month day) (apply values date)
-                                           `(th ,(ssubst "{0}-{1}" month day))))
-                                       (vector->list days 0 n-days))))
-                           (tbody
-                            ,@(map (lambda (row)
-                                     (receive (tag channel) (apply values (car row))
-                                       `(tr (th ,(tag-link base-url tag))
-                                            (th ,(channel-link base-url tag channel))
-                                            ,@(channel-days-tds base-url tag channel days
-                                                                (cadr row) 0 n-days))))
-                                   rows)))
-                          ,(footer))))))))))
+    (let ((base-url (self 'base-url))
+          (base-date (or (query-date query) (current-date 0)))
+          (n-days (cond ((and tag channel) 365)
+                        (else                7))))
+      (cond
+       ((and tag channel (assq-ref query 'q))
+        => (lambda (q) (render-search-task base-url tag channel q)))
+       (else
+        (let ((state (self %get-state tag channel base-date n-days)))
+          (receive (days rows)
+                   (state-tabularize (state-sort `((1 ,string<? ,string=?)
+                                                   (2 ,string<? ,string=?)
+                                                   (0 ,string<? ,string=?))
+                                                 state))
+            (let ((n-rows (length rows)))
+              (cond ((= n-rows 0)
+                     #f)
+                    ((and tag channel)
+                     (assert (= n-rows 1))
+                     (render-channel-overview/html base-url tag channel days (cadar rows)))
+                    (else
+                     (self %render-multi-overview/html
+                           tag channel (or (query-date query) (current-date 0)) days rows))))))))))
+
+  (define-method (*irclogs* %render-multi-overview/html self resend tag channel base-date days rows)
+    (let ((base-url (self 'base-url))
+          (n-days (min 7 (vector-length days))))
+      (and (> n-days 0)
+           `((h1 ,(breadcrumbs base-url tag channel #f))
+             ,(self %activity-nav-links tag channel base-date n-days 7)
+             (table
+              (^ (class "activity"))
+              (thead
+               (tr (th "Network") (th "Channel")
+                   ,@(map (lambda (date)
+                            (receive (year month day) (apply values date)
+                              `(th ,(ssubst "{0}-{1}" month day))))
+                          (vector->list days 0 n-days))))
+              (tbody
+               ,@(map (lambda (row)
+                        (receive (tag channel) (apply values (car row))
+                          `(tr (th ,(tag-link base-url tag))
+                               (th ,(channel-link base-url tag channel))
+                               ,@(channel-days-tds base-url tag channel days
+                                                   (cadr row) 0 n-days))))
+                      rows)))
+             ,(footer)))))
 
   (define-method (*irclogs* 'render-log/html self resend tag channel date)
     (receive (year month day) (parse-date date)

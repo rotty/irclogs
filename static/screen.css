@@ -60,6 +60,10 @@ a img {
     text-align: center;
 }
 
+#search {
+    text-align: center;
+}
+
 table.log {
     margin-left: auto;
     margin-right: auto;
