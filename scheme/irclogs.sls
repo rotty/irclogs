@@ -262,7 +262,7 @@
         (else
          `(tr (td (^ (class "meta") (colspan 2)) ,message))))))
 
-  (trace-define (filter-fold-log-file/shtml port pred proc . seeds)
+  (define (filter-fold-log-file/shtml port pred proc . seeds)
     (apply fold-irc-log-file
            port
            (lambda (entry count . seeds)
@@ -283,6 +283,10 @@
     (receive (count markup)
              (fold-log-file/shtml port (lambda (shtml markup) (cons shtml markup)) '())
       `(table (^ (class "log")) ,@(reverse markup))))
+
+  (define (q->matcher q)
+    (lambda (entry)
+      (string-contains (irc-log-entry-message entry) q)))
 
   (define (footer)
     `(div (^ (id "foot"))
@@ -370,15 +374,17 @@
                        markup)
                       (+ i n-columns)))))))
 
-  (define (log-search-task heading port log-port)
+  (define (log-search-task heading port log-port match?)
     (receive (msg-count first?)
-             (fold-log-file/shtml log-port
-                                  (lambda (shtml first?)
-                                    (when first?
-                                      (sxml->xml `(tr (th (^ (colspan 2)) ,heading)) port))
-                                    (sxml->xml shtml port)
-                                    #f)
-                                  #t)
+             (filter-fold-log-file/shtml
+              log-port
+              match?
+              (lambda (shtml first?)
+                (when first?
+                  (sxml->xml `(tr (th (^ (colspan 2)) ,heading)) port))
+                (sxml->xml shtml port)
+                #f)
+              #t)
       (yield/c #t)
       msg-count))
 
@@ -689,7 +695,7 @@
                         (else                7))))
       (cond
        ((and tag channel (assq-ref query 'q))
-        => (lambda (q) (self %render-search-task tag channel base-date n-days q)))
+        => (lambda (q) (self %render-search-task tag channel base-date n-days (q->matcher q))))
        (else
         (let ((state (self %get-state tag channel base-date n-days)))
           (receive (days rows)
@@ -826,7 +832,7 @@
             (file-readable? path)
             (transcoded-port (open-file-input-port (x->namestring path)) (native-transcoder))))))
 
-  (define-method (*irclogs* %render-search-task self resend tag channel base-date n-days q)
+  (define-method (*irclogs* %render-search-task self resend tag channel base-date n-days match?)
     `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
       (table
        (^ (class "log"))
@@ -834,7 +840,7 @@
                 (let ((timer (start-timer)))
                   (receive (day-count msg-count)
                            (self %day-range-search-task
-                                 port tag channel base-date (date+days base-date (- n-days)))
+                                 port tag channel base-date (date+days base-date (- n-days)) match?)
                     `(div (^ (id "timing"))
                           ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
                                    msg-count
@@ -843,7 +849,8 @@
       (task-result)
       ,(footer)))
 
-  (define-method (*irclogs* %day-range-search-task self resend port tag channel start-date end-date)
+  (define-method (*irclogs* %day-range-search-task self resend
+                            port tag channel start-date end-date match?)
     (let ((base-url (self 'base-url)))
       (fold-days-between
        start-date
@@ -854,10 +861,10 @@
           (+ msg-count
              (or
               (and-let* ((log-port (self 'open-log-file tag channel date)))
-                (log-search-task
-                 (day-link base-url tag channel date (isodate-str date))
-                 port
-                 log-port))
+                (log-search-task (day-link base-url tag channel date (isodate-str date))
+                                 port
+                                 log-port
+                                 match?))
               0))))
        0 0)))
 
