@@ -261,16 +261,26 @@
         (else
          `(tr (td (^ (class "meta") (colspan 2)) ,message))))))
 
+  (define (filter-fold-log-file/shtml port pred proc . seeds)
+    (apply fold-irc-log-file
+           port
+           (lambda (entry count . seeds)
+             (apply values
+                    (if (irc-log-entry-nick entry)
+                        (+ count 1)
+                        count)
+                    (if (pred entry)
+                        (receive new-seeds (apply proc (log-entry->shtml count entry) seeds)
+                          new-seeds)
+                        seeds)))
+           0 seeds))
+
+  (define (fold-log-file/shtml port proc . seeds)
+    (apply filter-fold-log-file/shtml port (lambda (entry) #t) proc seeds))
+
   (define (log-file->shtml port)
     (receive (count markup)
-             (fold-irc-log-file
-              port
-              (lambda (entry count markup)
-                (values (if (irc-log-entry-nick entry)
-                            (+ count 1)
-                            count)
-                        (cons (log-entry->shtml count entry) markup)))
-              0 '())
+             (fold-log-file/shtml port (lambda (shtml markup) (cons shtml markup)) '())
       `(table (^ (class "log")) ,@(reverse markup))))
 
   (define (footer)
