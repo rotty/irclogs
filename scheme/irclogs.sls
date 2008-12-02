@@ -703,6 +703,8 @@
   (define-method (*irclogs* 'render-log/html self resend tag channel date)
     (receive (year month day) (parse-date date)
       (and year month day
+           ;; call %get-state to ensure we are indeed serving that channel
+           (not (null? (self %get-state tag channel (mk-date year month day) 1)))
            (let ((path (log-path (self 'log-dir)
                                  (cons 'year (self 'dir-struct))
                                  tag channel year month day)))
