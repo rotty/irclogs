@@ -875,7 +875,7 @@
                                            (if channel (list channel "/"))))))
       (define (date-link date text)
         (let ((url (url-escape (ssubst "{0}{1}?date={2}" (self 'base-url) loc (isodate-str date))
-                               "/?")))
+                               "/?=")))
           `(a (^ (href ,url)) ,text)))
       `(div (^ (id "nav"))
             ,(date-link next-date "<<")
