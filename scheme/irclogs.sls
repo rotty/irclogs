@@ -23,6 +23,7 @@
           (spells tracing)
           (fmt)
           (prometheus)
+          (sxml simple)
           (irclogs parse)
           (irclogs utils))
 
@@ -189,13 +190,13 @@
                          (string-concatenate (car file-part))
                          (car file-part)))))
 
-  (define (log-path log-dir template tag channel year month day)
+  (define (log-path log-dir template tag channel date)
     (vals->pathname log-dir
                     `((tag . ,tag)
                       (channel . ,channel)
-                      (year . ,(num->str year 4))
-                      (month . ,(num->str month 2))
-                      (day . ,(num->str day 2)))
+                      (year . ,(num->str (date-year date) 4))
+                      (month . ,(num->str (date-month date) 2))
+                      (day . ,(num->str (date-day date) 2)))
                     template))
 
   (define (parse-date s)
@@ -340,7 +341,7 @@
                 (accept-charset "utf-8"))
              (input (^ (name "q") (title ,title) (size 42) (maxlength 2048)))
              (br)
-             (input (^ (type "submit") (name "search-btn") (value ,title))))))
+             (input (^ (type "submit") (name "search-btn") (value "Search"))))))
 
   (define (render-channel-overview/html base-url tag channel days prop-vec)
     `((h1 ,(breadcrumbs base-url tag channel #f))
@@ -348,14 +349,10 @@
       ,@(append-map
          (lambda (month-borders)
            (receive (year month day) (apply values (vector-ref days (car month-borders)))
-             (list `(h2 ,(month-string year month))
+             (list `(h2 ,(month-string (mk-date year month day)))
                    (channel-monthly-table base-url tag channel 10 days prop-vec
                                           (car month-borders) (cdr month-borders)))))
          (days-month-borders days))))
-
-  (define (render-search-task base-url tag channel q)
-    `((h1 ,(breadcrumbs base-url tag channel #f #t))
-      "Would search for: " ,q))
 
   (define (channel-monthly-table base-url tag channel n-columns days prop-vec start end)
     `(table
@@ -371,6 +368,16 @@
                              ,@(make-list n-empty '(td))))
                        markup)
                       (+ i n-columns)))))))
+
+  (define (log-search-task log-opener)
+    (lambda (port)
+      (and-let* ((log-port (log-opener)))
+        (call-with-port log-port
+          (trace-lambda search-log (log-port)
+            (fold-log-file/shtml log-port
+                                 (lambda (shtml ignore) (sxml->xml shtml port))
+                                 #f)))
+        (yield/c #t))))
 
   (define breadcrumbs
     (case-lambda
@@ -395,8 +402,8 @@
       ((base-url tag channel date)
        (breadcrumbs base-url tag channel date #f))))
 
-  (define (month-string year month)
-    (date->string (make-date 0 0 0 0 1 month year 0) "~B ~Y"))
+  (define (month-string date)
+    (date->string date "~B ~Y"))
 
   (define (base-link base-url)
     `(a (^ (href ,base-url)) "IRC"))
@@ -529,17 +536,23 @@
   (define *one-day* (make-time time-duration 0 (* 24 60 60)))
 
   (define (days-between start-day end-day)
-    (define (day->time-utc day)
-      (date->time-utc (make-date 0 0 0 0 (caddr day) (cadr day) (car day) 0)))
-    (let ((start (day->time-utc start-day))
-          (end (add-duration (day->time-utc end-day) *one-day*)))
-      (let loop ((cur start) (days '()))
+    (define (day->date day)
+      (make-date 0 0 0 0 (caddr day) (cadr day) (car day) 0))
+    (fold-days-between (day->date start-day) (day->date end-day)
+                       (lambda (date days)
+                         (cons (list (date-year date) (date-month date) (date-day date))
+                               days))
+                       '()))
+
+  (define (fold-days-between start-day end-day proc . seeds)
+    (let ((start (date->time-utc start-day))
+          (end (add-duration (date->time-utc end-day) *one-day*)))
+      (let loop ((cur start) (seeds seeds))
         (if (time>=? cur end)
-            days
+            (apply values seeds)
             (let ((cur-date (time-utc->date cur 0)))
               (loop (add-duration cur *one-day*)
-                    (cons (list (date-year cur-date) (date-month cur-date) (date-day cur-date))
-                          days)))))))
+                    (receive new-seeds (apply proc cur-date seeds) new-seeds)))))))
 
   (define (sexp->matcher expr)
     (define (submatcher mapper)
@@ -642,6 +655,7 @@
     %set-base-url!
     %matcher %set-matcher!
     %render-multi-overview/html
+    %render-search-task
     %activity-nav-links
     %log-nav-links)
 
@@ -668,7 +682,7 @@
                         (else                7))))
       (cond
        ((and tag channel (assq-ref query 'q))
-        => (lambda (q) (render-search-task base-url tag channel q)))
+        => (lambda (q) (self %render-search-task tag channel base-date n-days q)))
        (else
         (let ((state (self %get-state tag channel base-date n-days)))
           (receive (days rows)
@@ -713,19 +727,13 @@
   (define-method (*irclogs* 'render-log/html self resend tag channel date)
     (receive (year month day) (parse-date date)
       (and year month day
-           ;; call %get-state to ensure we are indeed serving that channel
-           (not (null? (self %get-state tag channel (mk-date year month day) 1)))
-           (let ((path (log-path (self 'log-dir)
-                                 (cons 'year (self 'dir-struct))
-                                 tag channel year month day)))
-             (and (file-exists? path)
-                  (file-readable? path)
-                  (call-with-input-file (x->namestring path)
-                    (lambda (port)
-                      `((h1 ,(breadcrumbs (self 'base-url) tag channel date))
-                        ,(self %log-nav-links tag channel (mk-date year month day))
-                        ,(log-file->shtml port)
-                        ,(footer)))))))))
+           (and-let* ((port (self 'open-log-file tag channel (mk-date year month day))))
+             (call-with-port port
+               (lambda (port)
+                 `((h1 ,(breadcrumbs (self 'base-url) tag channel date))
+                   ,(self %log-nav-links tag channel (mk-date year month day))
+                   ,(log-file->shtml port)
+                   ,(footer))))))))
 
   (define-method (*irclogs* 'update-state self resend)
     (let ((state-dir (self 'state-dir))
@@ -800,6 +808,30 @@
           (begin
             (create-directory* state-dir)
             '()))))
+
+
+  (define-method (*irclogs* 'open-log-file self resend tag channel date)
+    (and
+     ;; call %get-state to ensure we are indeed serving that channel
+     (not (null? (self %get-state tag channel date 1)))
+     (let ((path (log-path (self 'log-dir) (cons 'year (self 'dir-struct)) tag channel date)))
+       (and (file-exists? path)
+            (file-readable? path)
+            (transcoded-port (open-file-input-port (x->namestring path)) (native-transcoder))))))
+
+  (define-method (*irclogs* %render-search-task self resend tag channel base-date n-days q)
+    `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
+      ,@(fold-days-between
+         (date+days base-date (- n-days))
+         base-date
+         (lambda (date markup)
+           (append
+            `((h2 ,(isodate-str date))
+              (table (^ (class "log"))
+                     (task ,(log-search-task (lambda ()
+                                               (self 'open-log-file tag channel date))))))
+            markup))
+         '())))
 
   (define-method (*irclogs* %activity-nav-links self resend tag channel base-date n-days-shown step)
     (let ((next-date (date+days base-date step))
