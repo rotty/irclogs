@@ -178,22 +178,49 @@
   ;; Note that `user-data' will go away when I get around to implement hiding it
   (lambda (server msg path query client user-data)
     (let ((method (send msg (get 'method)))
+          (req-headers (send msg (get-request-headers)))
           (query-alist (map (lambda (e)
                               (cons (string->symbol (car e)) (cdr e)))
                             (ghash->alist query))))
       (println "{0} {1} {2} HTTP/1.{3}" method path query-alist (send msg (get 'http-version)))
-      (send (send msg (get-request-headers))
+      (send req-headers
         (foreach (lambda (name value user-data)
                    (println "{0}: {1}" name value))))
       (let ((body (send msg (get-request-body))))
         (when (> (send body (get-length)) 0)
           (println (send body (get-data)))))
-      (cond
-       ((handler server msg path query-alist)
-        (println " -> {0} {1}" (send msg (get 'status-code)) (send msg (get 'reason-phrase))))
-       (else
-        (send server (pause-message msg))
-        (println " -> deferred"))))))
+      (receive (code last-modified generate-response)
+               (handler server msg path query-alist)
+        (define (log-response)
+          (println " -> {0} {1}" (send msg (get-status-code)) (send msg (get 'reason-phrase))))
+        (define (add-headers)
+          (when last-modified
+            (add-response-headers!
+             msg
+             (cons "Last-Modified" (time-utc->http-date last-modified)))))
+        (define (do-respond)
+          (generate-response)
+          (case code
+            ((defer)
+             (send server (pause-message msg))
+             (println " -> deferred"))
+            (else
+             (add-headers)
+             (send msg (set-status (soup-status code)))
+             (log-response))))
+        (define (not-modified)
+          (add-headers)
+          (send msg (set-status (soup-status 'not-modified)))
+          (log-response))
+        (cond ((and last-modified (send req-headers (get "If-Modified-Since")))
+               => (lambda (date-str)
+                    (cond ((and-let* ((hdr-date (parse-http-date date-str)))
+                             (time>? last-modified (date->time-utc hdr-date)))
+                           (do-respond))
+                          (else
+                           (not-modified)))))
+              (else
+               (do-respond)))))))
 
 (define (msg-method msg)
   (string->symbol (string-downcase (send msg (get 'method)))))
@@ -230,8 +257,7 @@
   "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"
     \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">")
 
-
-(define (handle-sxml-page  base-url msg code title defer sxml)
+(define (handle-sxml-page base-url msg code title defer response)
   (receive (port flush) (make-soup-output-port+flusher (send msg (get-response-body)))
     (let* ((http-version (send msg (get 'http-version)))
            (last-proc #f)
@@ -244,7 +270,7 @@
            (first-escape? #t)
            (sxml
             (pre-post-order
-             sxml
+             response ; FIXME: interpret and strip meta
              `((task *PREORDER* .
                      ,(lambda (tag proc)
                         (define (decorated port)
@@ -280,83 +306,78 @@
                                        (task-result
                                         (sxml->xml task-result port))))))
                (*DEFAULT* . ,list)))))
+      (add-response-headers! msg '("Content-Type" . "text/html; charset=utf-8"))
+      ;; we defer the response when using HTTP 1.0 and there was a
+      ;; task involved (as HTTP 1.0 doesn't support chunked encoding)
+      (let ((defer? (and (= http-version 0) last-proc)))
+        (values
+         (if defer? 'defer 'ok)
+         #f
+         (lambda ()
+           (when (> http-version 0)
+             (send (send msg (get-response-body))
+               (set-accumulate #f)))
 
-      (when (> http-version 0)
-        (send (send msg (get-response-body))
-          (set-accumulate #f)))
+           (when (and last-proc (> http-version 0))
+             (send (send msg (get-response-headers))
+               (set-encoding 'chunked))
+             (send msg (connect 'finished (lambda (msg)
+                                            (set! message-done? #t)))))
 
-      (when (and last-proc (> http-version 0))
-        (send (send msg (get-response-headers))
-          (set-encoding 'chunked))
-        (send msg (connect 'finished (lambda (msg)
-                                       (set! message-done? #t)))))
-
-      (let ((tport (transcoded-port port (make-transcoder (utf-8-codec)))))
-        (put-string tport xhtml-doctype)
-        (call/cc
-         (lambda (k)
-           (set! escape k)
-           (xhtml-page tport base-url title sxml)))
-        (unless message-done?
-          (flush-output-port tport)
-          (flush))
-        (cond ((and last-proc tasks-done?)
-               (close-output-port tport)
-               (work-k))     ; here we escape back into the idle worker
-              ((or (not last-proc) first-escape?)
-               (set! first-escape? #f)
-               (when (not last-proc)
-                 (close-output-port tport))
-               (send msg (set-status (soup-status 'ok)))
-               ;; return wether the message is ready to be
-               ;; sent, which is always the case, except when
-               ;; using HTTP 1.0 and there was a task involved
-               ;; (as HTTP 1.0 doesn't support chunked
-               ;; encoding)
-               (not (and (= http-version 0) last-proc)))
-              (else
-               ;; we have some not-finished tasks, and it's not the
-               ;; first escape
-               (work-k)))))))
+           (let ((tport (transcoded-port port (make-transcoder (utf-8-codec)))))
+             (put-string tport xhtml-doctype)
+             (call/cc
+              (lambda (k)
+                (set! escape k)
+                (xhtml-page tport base-url title sxml)))
+             (unless message-done?
+               (flush-output-port tport)
+               (flush))
+             (when defer?
+               (send msg (set-status (soup-status 'ok))))
+             (cond ((and last-proc tasks-done?)
+                    (close-output-port tport)
+                    (work-k)) ; here we escape back into the idle worker
+                   ((or (not last-proc) first-escape?)
+                    (set! first-escape? #f)
+                    (when (not last-proc)
+                      (close-output-port tport)))
+                   (else
+                    ;; we have some not-finished tasks, and it's not the
+                    ;; first escape
+                    (work-k))))))))))
 
 (define (handle-page base-url msg code title defer proc . args)
   (let ((method (msg-method msg)))
     (case method
       ((get head)
-       (add-response-headers! msg '("Content-Type" . "text/html; charset=utf-8"))
-       (case method
-         ((get)
-          (handle-sxml-page base-url msg code title defer (apply proc args)))
-         (else
-          (send msg (set-status (soup-status 'not-implemented)))
-          #t))))))
+       (handle-sxml-page base-url msg code title defer (apply proc args)))
+      (else
+       (values 'not-implemented #f #f)))))
 
 (define (irclogs-handler defer irclogs)
   (define (invoke msg-name)
     (lambda args
       (apply irclogs msg-name args)))
   (lambda (server msg path query)
-    (let* ((pathname (x->pathname path))
+    (let* ((just-meta? (eq? (send msg (get-method)) 'head))
+           (pathname (x->pathname path))
            (comps (pathname-directory pathname))
            (n-comps (length comps))
            (base-url (irclogs 'base-url)))
       (define (not-found)
-        (handle-page base-url msg 'not-found "Page not found" defer render-error-page 'not-found)
-        (send msg (set-status (soup-status 'not-found)))
-        #t)
+        (handle-page base-url msg 'not-found "Page not found" defer render-error-page 'not-found))
       (cond ((and (pathname=? pathname root-pathname)
-                  (irclogs 'render-overview/html #f #f query))
+                  (irclogs 'render-overview/html just-meta? #f #f query))
              => (lambda (sxml)
-                  (handle-page base-url msg 'ok  (page-title) defer (lambda () sxml))))
+                  (handle-page base-url msg 'ok (page-title) defer (lambda () sxml))))
             ((pathname-file pathname)
              (receive (found? ready?)
                       (cond ((pathname=? (pathname-with-file pathname #f) root-pathname)
                              (let ((filename (file-namestring pathname)))
                                (cond ((string=? filename "count.scm")
-                                      (values
-                                       #t
-                                       (handle-page base-url msg 'ok "Counter task" defer
-                                                    counter-page-renderer query)))
+                                      (handle-page base-url msg 'ok "Counter task" defer
+                                                   counter-page-renderer query))
                                      (else
                                       (values #f #f)))))
                             (else
@@ -364,18 +385,18 @@
                (if found?
                    ready?
                    (let ((uri (send (send msg (get-uri)) (to-string #f))))
-                     (send (send msg (get-response-headers))
-                       (append "Location" (string-append uri "/")))
-                     (send msg (set-status (soup-status 'moved-permanently)))
-                     #t))))
+                     (values 'moved-permanently
+                             (lambda ()
+                               (send (send msg (get-response-headers))
+                                 (append "Location" (string-append uri "/")))))))))
             ((or (and (= n-comps 1)
-                      (irclogs 'render-overview/html (car comps) #f query))
+                      (irclogs 'render-overview/html just-meta? (car comps) #f query))
                  (and (= n-comps 2)
-                      (irclogs 'render-overview/html (car comps) (cadr comps) query))
+                      (irclogs 'render-overview/html just-meta? (car comps) (cadr comps) query))
                  (and (= n-comps 3)
-                      (apply irclogs 'render-log/html comps)))
-             => (lambda (sxml)
-                  (handle-page base-url msg 'ok (apply page-title comps) defer (lambda () sxml))))
+                      (apply irclogs 'render-log/html just-meta? comps)))
+             => (lambda (response)
+                  (handle-page base-url msg 'ok (apply page-title comps) defer (lambda () response))))
             (else
              (not-found))))))
 
@@ -407,10 +428,17 @@
                 (send resp-hdrs (append (car hdr/val) (cdr hdr/val))))
               hdrs)))
 
+(define http-date-fmt "~a, ~d ~b ~Y ~H:~M:~S GMT")
+
+(define (time-utc->http-date time)
+  (date->string (time-utc->date time 0) http-date-fmt))
+
+(define (parse-http-date s)
+  (guard (c (#t #f))
+    (date-with-zone-offset (string->date s http-date-fmt) 0)))
+
 (define (static-file-handler base strip)
   (lambda (server msg path query)
-    (define (ok!)
-      (send msg (set-status (soup-status 'ok))))
     (let* ((rel-path (and-let* ((req-path (x->pathname path))
                                 (dirs (pathname-directory req-path))
                                 (stripped (and (>= (length dirs) strip)
@@ -424,23 +452,27 @@
              (let ((content-type (file-content-type pathname)))
                (case (msg-method msg)
                  ((get)
-                  (call-with-port (open-file-input-port (x->namestring pathname))
-                    (lambda (port)
-                      (send msg (set-response content-type 'copy (get-bytevector-all port)))
-                      (ok!))))
+                  (values
+                   'ok
+                   (file-modification-time pathname)
+                   (lambda ()
+                     (call-with-port (open-file-input-port (x->namestring pathname))
+                       (lambda (port)
+                         (send msg (set-response content-type 'copy (get-bytevector-all port))))))))
                  ((head)
-                  (add-response-headers!
-                   msg
-                   (cons "Content-Type" content-type)
-                   (cons "Content-Length" (number->string (file-size-in-bytes pathname))))
-                  (ok!))
+                  (values
+                   'ok
+                   (file-modification-time pathname)
+                   (lambda ()
+                     (add-response-headers!
+                      msg
+                      (cons "Content-Type" content-type)
+                      (cons "Content-Length" (number->string (file-size-in-bytes pathname)))))))
                  (else
-                  (send msg (set-status (soup-status 'not-implemented)))))))
+                  (values 'not-implemented #f #f)))))
             (else
              (send msg
-               (set-status (soup-status
-                            (if (and pathname (file-exists? pathname)) 'forbidden 'not-found)))))))
-    #t))
+               (values (if (and pathname (file-exists? pathname)) 'forbidden 'not-found) #f #f)))))))
 
 (define (xhtml-page port base-url title sxml)
   (sxml->xml

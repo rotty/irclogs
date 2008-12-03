@@ -678,7 +678,7 @@
                 options)
       logs))
 
-  (define-method (*irclogs* 'render-overview/html self resend tag channel query)
+  (define-method (*irclogs* 'render-overview/html self resend just-meta? tag channel query)
     (let ((base-url (self 'base-url))
           (base-date (or (query-date query) (current-date 0)))
           (n-days (cond ((and tag channel) 365)
@@ -727,7 +727,7 @@
                       rows)))
              ,(footer)))))
 
-  (define-method (*irclogs* 'render-log/html self resend tag channel date)
+  (define-method (*irclogs* 'render-log/html self resend just-meta? tag channel date)
     (receive (year month day) (parse-date date)
       (and year month day
            (and-let* ((port (self 'open-log-file tag channel (mk-date year month day))))
