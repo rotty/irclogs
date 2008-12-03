@@ -22,19 +22,26 @@
 ;;; Code:
 
 (library (irclogs utils)
-  (export make-timer start-timer
-          current-yield yield/c
+  (export
+   make-timer start-timer
+   date-with-zone-offset
+   current-yield yield/c
 
-          make-scheduler scheduler? scheduler-work scheduler-enqueue!
-          scheduler-has-work?
+   make-scheduler scheduler? scheduler-work scheduler-enqueue!
+   scheduler-has-work?
 
-           ssubst fprintf println)
+   ssubst fprintf println
+
+   host-impl-info-shtml
+   )
   (import (rnrs)
           (spells receive)
           (spells opt-args)
+          (spells alist)
           (spells queue)
           (spells time-lib)
           (spells parameter)
+          (spells misc)
           (spells string-substitute)
           (spells tracing))
 
@@ -62,6 +69,16 @@
     (let ((timer (make-timer)))
       (timer 'start)
       timer))
+
+  (define (date-with-zone-offset date tz-offset)
+    (make-date (date-nanosecond date)
+               (date-second date)
+               (date-minute date)
+               (date-hour date)
+               (date-day date)
+               (date-month date)
+               (date-year date)
+               tz-offset))
 
   (define current-yield (make-parameter #f))
 
@@ -135,5 +152,16 @@
 
   (define (fprintf port fmt . args)
     (string-substitute port fmt args 'braces))
+
+  (define scheme-impl-urls
+    '((ikarus . "http://www.cs.indiana.edu/~aghuloum/ikarus/")))
+
+  (define (host-impl-info-shtml)
+    (let* ((dialect (scheme-dialect))
+           (url (assq-ref scheme-impl-urls dialect))
+           (impl-name (ssubst "{0} Scheme" (string-titlecase (symbol->string dialect)))))
+      (if url
+          `(a (^ (href ,url)) ,impl-name)
+          impl-name)))
 
   )

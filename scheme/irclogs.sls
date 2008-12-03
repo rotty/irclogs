@@ -611,16 +611,6 @@
     (let ((step (time-* n-days *one-day*)))
       (add-duration (date->time-utc date) step)))
 
-  (define (date-with-zone-offset date tz-offset)
-    (make-date (date-nanosecond date)
-               (date-second date)
-               (date-minute date)
-               (date-hour date)
-               (date-day date)
-               (date-month date)
-               (date-year date)
-               tz-offset))
-
   (define (query-date query)
     (let ((val (assq-ref query 'date)))
       (and val
