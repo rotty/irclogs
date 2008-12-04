@@ -416,6 +416,7 @@
 
 (define *file-types*
   '(("css" . "text/css")
+    ("html" . "text/html")
     ("txt" . "text/plain")))
 
 (define (file-content-type pathname)
@@ -475,16 +476,20 @@
                (values (if (and pathname (file-exists? pathname)) 'forbidden 'not-found) #f #f)))))))
 
 (define (xhtml-page port base-url title sxml)
+  (define (static name)
+    (string-append base-url "static/" name))
   (sxml->xml
    `(html (^ (xmlns "http://www.w3.org/1999/xhtml")
              (lang "en")
              (xml:lang "en"))
           (head
            (meta (^ (name "GENERATOR")
-                    (content "irc2html.sps by MJ Ray, hacked by Andreas Rottmann")))
+                    (content "IRClogs by Andreas Rottmann, based on code by MJ Ray")))
            (title ,title)
            (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
-                    (href ,(string-append base-url "static/screen.css"))))
+                    (href ,(static "common.css"))))
+           (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
+                    (href ,(static "irclogs.css"))))
            (style (^ (type "text/css"))
              ,(string-concatenate
                (append

@@ -1,0 +1,49 @@
+* The IRClogs Scheme system
+
+IRClogs is a software package written in [[http://en.wikipedia.org/wiki/Scheme_(programming_language)][Scheme]], presenting a web
+interface to a collection of IRC logs. 
+
+** Features
+
+- Serve logs from multiple channels, organized by "tags", which
+  normally correspond to IRC networks
+
+- Overview pages for all channels logged, all channels logged with a
+  given tag, and a single channel. These overview pages are
+  navigatable by date.
+
+- The text log files rendered as HTML tables, with messages
+  color-coded indicating the nick sending the message.
+
+- Search a channel for messages
+
+** Planned features
+
+- Toggling of channel events (joins, quits, etc.) via JavaScript or a
+  query option
+
+- Allow selecting selecting a base date for overviews, which will also
+  allow shifting the default search base date
+
+- Improve search:
+
+  - Links directly to log at the times of the hits
+  - Regex matches
+  - Specify nicks to match
+  - Specify amount of context around a message to show
+  - Highlight matches
+
+** Instances
+
+Currently, there's an experimental instance of IRClogs running at
+[[http://rottyforge.yi.org/irclogs/]], serving a few select channels on
+the GNOME and freenode networks.
+
+** Documentation
+
+Currently, there's no documentation real documentation for IRClogs,
+neither how to set an instance up, nor how to use the web interface
+(which should be pretty self-explanatory), so if you have questions,
+after having a look at the [[http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=headblob;f=/README][README]], and taking a look at the [[http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=summary][Source]] (if
+you're brave ;-)) I usually hang out on [[http://rottyforge.yi.org/irclogs/freenode/%23scheme/][irc://freenode/#scheme]] as
+~rotty~ -- just send me a ping, but don't hold your breadth.

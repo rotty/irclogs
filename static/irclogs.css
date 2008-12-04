@@ -17,30 +17,6 @@ h1, h2 {
     width: 100%;
 }
 
-a:link {
-  color: #00f;
-  text-decoration: none;
-}
-
-a:visited {
-  color: #800;
-  text-decoration: none;
-}
-
-a:hover:link, a:active:link {
-  color: #eee;
-  background-color: #00f;
-}
-
-a:hover:visited, a:active:visited {
-  color: #eee;
-  background-color: #800;
-}
-
-a img {
-    border: none;
-}
-
 #nav {
     float: right;
     width: 100%;
@@ -61,7 +37,7 @@ a img {
 
 #foot {
     padding: 1em;
-    font-size: small;
+    font-size: smaller;
     font-style: italic;
     text-align: center;
 }
