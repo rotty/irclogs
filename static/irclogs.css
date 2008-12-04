@@ -105,13 +105,21 @@ table.mactivity th {
     padding-right: 0.3em;
     text-align: center;
 }
-table.mactivity td {
+table.mactivity td.pin {
     border-width: thin;
-    border-style: dashed;
-    padding-left: 0.3em;
-    padding-right: 0.3em;
-    width: 5em;
+    border-style: dashed none dashed dashed;
+    padding-left: 2px;
+    padding-right: 2px;
+    text-align: left;
+    width: 16px;
+}
+table.mactivity td.day-info {
+    border-width: thin;
+    border-style: dashed dashed dashed none;
+    padding-left: 2px;
+    padding-right: 2px;
     text-align: center;
+    width: 6em;
 }
 
 .meta { color: #999; }

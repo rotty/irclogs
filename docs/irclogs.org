@@ -20,10 +20,10 @@ interface to a collection of IRC logs.
 ** Planned features
 
 - Toggling of channel events (joins, quits, etc.) via JavaScript or a
-  query option
+  query option (JavaScript part already implemented)
 
-- Allow selecting selecting a base date for overviews, which will also
-  allow shifting the default search base date
+- Allow selecting a base date for overviews, which will also allow
+  shifting the default search base date
 
 - Improve search:
 
@@ -31,6 +31,7 @@ interface to a collection of IRC logs.
   - Regex matches
   - Specify nicks to match
   - Specify amount of context around a message to show
+  - Allow explicitly specifying base date
   - Highlight matches
 
 ** Instances

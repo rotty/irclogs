@@ -300,7 +300,7 @@
                         (width 66)))))
           |#))
 
-  (define (channel-days-tds base-url tag channel days prop-vec . args)
+  (define (channel-days-tds base-url tag channel pin? days prop-vec . args)
     (let-optionals* args ((start 0)
                           (end (vector-length days))
                           (with-day? #f))
@@ -314,17 +314,27 @@
                  (ssubst "({0})" count))
                 (else
                  "")))
-        (define (day-td day props)
-          `(td ,(cond ((assq-ref props 'message-count)
-                       => (lambda (count)
-                            (day-link base-url tag channel (apply mk-date day)
-                                      (text day (car count)))))
-                      (else
-                       (text day #f)))))
+        (define (day-tds day props)
+          (append
+           (if pin?
+               `((td (^ (class "pin"))
+                      ,(date-link base-url tag channel (apply mk-date day)
+                                  `(img (^ (src ,(string-append base-url "static/pin.png"))
+                                           (alt "pin")
+                                           (width 16) (height 16)))
+                                  '())))
+                       '())
+           `((td (^ (class "day-info"))
+                 ,(cond ((assq-ref props 'message-count)
+                         => (lambda (count)
+                              (day-link base-url tag channel (apply mk-date day)
+                                        (text day (car count)))))
+                        (else
+                         (text day #f)))))))
         (let loop ((markup '()) (i (- end 1)))
           (if (< i start)
               markup
-              (loop (cons (day-td (vector-ref days i) (vector-ref prop-vec i)) markup)
+              (loop (append (day-tds (vector-ref days i) (vector-ref prop-vec i)) markup)
                     (- i 1)))))))
 
   (define (days-month-borders days . start+end)
@@ -357,7 +367,7 @@
          (lambda (month-borders)
            (receive (year month day) (apply values (vector-ref days (car month-borders)))
              (list `(h2 ,(month-string (mk-date year month day)))
-                   (channel-monthly-table base-url tag channel 10 days prop-vec
+                   (channel-monthly-table base-url tag channel 7 days prop-vec
                                           (car month-borders) (cdr month-borders)))))
          (days-month-borders days))))
 
@@ -368,9 +378,9 @@
           (if (>= i end)
               (reverse markup)
               (let* ((n-vals (min n-columns (- end i)))
-                     (n-empty (- n-columns n-vals)))
+                     (n-empty (* 2 (- n-columns n-vals))))
                 (loop (append
-                       `((tr ,@(channel-days-tds base-url tag channel days prop-vec
+                       `((tr ,@(channel-days-tds base-url tag channel #t days prop-vec
                                                  i (+ i n-vals) #t)
                              ,@(make-list n-empty '(td))))
                        markup)
@@ -404,7 +414,7 @@
               `(span ,(base-link base-url)
                      " > " ,(tag-link base-url tag)
                      " > " ,(channel-link base-url tag channel)
-                     " > " ,(last-link date-link base-url tag channel date)))
+                     " > " ,(last-link day-link base-url tag channel date (isodate-str date))))
              ((and tag channel)
               `(span ,(base-link base-url)
                      " > " ,(tag-link base-url tag)
@@ -428,9 +438,16 @@
   (define (channel-link base-url tag channel)
     `(a (^ (href ,(url-escape (string-append base-url tag "/" channel "/") "/"))) ,channel))
 
-  (define (date-link base-url tag channel date-str)
-    `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}/" base-url tag channel date-str) "/")))
-          ,date-str))
+  (define date-link
+    (case-lambda
+      ((base-url tag channel date text attrs)
+       `(a (^ (href ,(string-append
+                      (url-escape (ssubst "{0}{1}/{2}/" base-url tag channel) "/")
+                      "?date=" (isodate-str date)))
+              ,@attrs)
+           ,text))
+      ((base-url tag channel date)
+       (date-link base-url tag channel date (isodate-str date) '()))))
 
   (define (day-link base-url tag channel date text)
     `(a (^ (href ,(day-url base-url tag channel date))) ,text))
@@ -730,7 +747,7 @@
                         (receive (tag channel) (apply values (car row))
                           `(tr (th ,(tag-link base-url tag))
                                (th ,(channel-link base-url tag channel))
-                               ,@(channel-days-tds base-url tag channel days
+                               ,@(channel-days-tds base-url tag channel #f days
                                                    (cadr row) 0 n-days))))
                       rows)))
              ,(footer self)))))
@@ -746,7 +763,7 @@
                    `((meta (js-include "jquery.js")
                            (js-include "sitelib.js")
                            (js-text ,render-log-js))
-                     (h1 ,(breadcrumbs base-url tag channel date-str))
+                     (h1 ,(breadcrumbs base-url tag channel date))
                      ,(self %log-nav-links tag channel date)
                      (form (^ (id "options")
                               (action ,(day-url base-url tag channel date)))
