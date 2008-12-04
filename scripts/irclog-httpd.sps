@@ -199,7 +199,8 @@
              msg
              (cons "Last-Modified" (time-utc->http-date last-modified)))))
         (define (do-respond)
-          (generate-response)
+          (when generate-response
+            (generate-response))
           (case code
             ((defer)
              (send server (pause-message msg))
@@ -508,8 +509,7 @@
                  (else
                   (values 'not-implemented #f #f)))))
             (else
-             (send msg
-               (values (if (and pathname (file-exists? pathname)) 'forbidden 'not-found) #f #f)))))))
+             (values (if (and pathname (file-exists? pathname)) 'forbidden 'not-found) #f #f))))))
 
 (define (xhtml-page port base-url head sxml)
   (define (static name)
