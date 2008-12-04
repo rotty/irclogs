@@ -390,6 +390,9 @@
       (yield/c #t)
       msg-count))
 
+  (define render-log-js
+    "$(document).ready(function() { activate_log_options(); });")
+
   (define breadcrumbs
     (case-lambda
       ((base-url tag channel date link-last?)
@@ -430,12 +433,14 @@
           ,date-str))
 
   (define (day-link base-url tag channel date text)
-    `(a (^ (href ,(url-escape (ssubst "{0}{1}/{2}/{3}/"
+    `(a (^ (href ,(day-url base-url tag channel date))) ,text))
+
+  (define (day-url base-url tag channel date)
+    (url-escape (ssubst "{0}{1}/{2}/{3}/"
                                       base-url
                                       tag channel
                                       (isodate-str date))
-                              "/")))
-        ,text))
+                              "/"))
 
   (define url-escape
     (let ((safe-cs (char-set-union char-set:letter
@@ -730,16 +735,27 @@
                       rows)))
              ,(footer self)))))
 
-  (define-method (*irclogs* 'render-log/html self resend just-meta? tag channel date)
-    (receive (year month day) (parse-date date)
+  (define-method (*irclogs* 'render-log/html self resend just-meta? tag channel date-str)
+    (receive (year month day) (parse-date date-str)
       (and year month day
-           (and-let* ((port (self 'open-log-file tag channel (mk-date year month day))))
-             (call-with-port port
-               (lambda (port)
-                 `((h1 ,(breadcrumbs (self 'base-url) tag channel date))
-                   ,(self %log-nav-links tag channel (mk-date year month day))
-                   ,(log-file->shtml port)
-                   ,(footer self))))))))
+           (let ((base-url (self 'base-url))
+                 (date (mk-date year month day)))
+             (and-let* ((port (self 'open-log-file tag channel (mk-date year month day))))
+               (call-with-port port
+                 (lambda (port)
+                   `((meta (js-include "jquery.js")
+                           (js-include "sitelib.js")
+                           (js-text ,render-log-js))
+                     (h1 ,(breadcrumbs base-url tag channel date-str))
+                     ,(self %log-nav-links tag channel date)
+                     (form (^ (id "options")
+                              (action ,(day-url base-url tag channel date)))
+                           (span
+                            "Events: "
+                            (input (^ (type "checkbox") (name "events") (value "on"))))
+                           (input (^ (type "submit") (name "opt-btn") (value "Apply"))))
+                     ,(log-file->shtml port)
+                     ,(footer self)))))))))
 
   (define-method (*irclogs* 'update-state self resend)
     (let ((state-dir (self 'state-dir))

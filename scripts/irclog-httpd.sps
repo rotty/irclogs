@@ -30,7 +30,7 @@
         (spells alist)
         (spells table)
         (only (spells strings) string-join string-concatenate)
-        (only (spells lists) unfold drop)
+        (only (spells lists) unfold drop filter-map)
         (spells string-substitute)
         (spells pathname)
         (spells filesys)
@@ -253,12 +253,43 @@
 (define (counter-page-renderer query)
   (render-counter-page 30))
 
+(define (split-sxml-response response)
+  (if (and (pair? response)
+           (pair? (car response))
+           (eq? (caar response) 'meta))
+      (values (cdar response) (cdr response))
+      (values '() response)))
+
+(define (js-cdata str)
+  (xml-cdata-escape str (lambda (s)
+                          (string-append "/* <![CDATA[ */\n" s "\n /* ]]> */"))))
+
+(define (make-heads base-url title meta)
+  `((title ,title)
+    ,@(filter-map
+       (lambda (entry)
+         (and (pair? entry)
+              (case (car entry)
+                ((js-include)
+                 `(script (^ (type "text/javascript")
+                             (src ,(string-append base-url "static/" (cadr entry))))
+                          "//" ; force end tag
+                          ))
+                ((js-text)
+                 `(script (^ (type "text/javascript"))
+                          ,(lambda (port)
+                             (display (js-cdata (cadr entry)) port))))
+                (else
+                 #f))))
+       meta)))
+
 (define xhtml-doctype
   "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"
     \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">")
 
 (define (handle-sxml-page base-url msg code title defer response)
-  (receive (port flush) (make-soup-output-port+flusher (send msg (get-response-body)))
+  (let-values (((port flush) (make-soup-output-port+flusher (send msg (get-response-body))))
+               ((meta sxml) (split-sxml-response response)))
     (let* ((http-version (send msg (get 'http-version)))
            (last-proc #f)
            (output-k #f)
@@ -270,7 +301,7 @@
            (first-escape? #t)
            (sxml
             (pre-post-order
-             response ; FIXME: interpret and strip meta
+             sxml
              `((task *PREORDER* .
                      ,(lambda (tag proc)
                         (define (decorated port)
@@ -329,7 +360,7 @@
              (call/cc
               (lambda (k)
                 (set! escape k)
-                (xhtml-page tport base-url title sxml)))
+                (xhtml-page tport base-url (make-heads base-url title meta) sxml)))
              (unless message-done?
                (flush-output-port tport)
                (flush))
@@ -386,6 +417,7 @@
                    ready?
                    (let ((uri (send (send msg (get-uri)) (to-string #f))))
                      (values 'moved-permanently
+                             #f
                              (lambda ()
                                (send (send msg (get-response-headers))
                                  (append "Location" (string-append uri "/")))))))))
@@ -451,6 +483,11 @@
                   (file-readable? pathname)
                   (not (file-directory? pathname)))
              (let ((content-type (file-content-type pathname)))
+               (define (add-headers!)
+                 (add-response-headers!
+                  msg
+                  (cons "Content-Type" content-type)
+                  (cons "Content-Length" (number->string (file-size-in-bytes pathname)))))
                (case (msg-method msg)
                  ((get)
                   (values
@@ -459,23 +496,22 @@
                    (lambda ()
                      (call-with-port (open-file-input-port (x->namestring pathname))
                        (lambda (port)
-                         (send msg (set-response content-type 'copy (get-bytevector-all port))))))))
+                         (let ((content (get-bytevector-all port)))
+                           (if (eof-object? content)
+                               (add-headers!)
+                               (send msg (set-response content-type 'copy content)))))))))
                  ((head)
                   (values
                    'ok
                    (file-modification-time pathname)
-                   (lambda ()
-                     (add-response-headers!
-                      msg
-                      (cons "Content-Type" content-type)
-                      (cons "Content-Length" (number->string (file-size-in-bytes pathname)))))))
+                   add-headers!))
                  (else
                   (values 'not-implemented #f #f)))))
             (else
              (send msg
                (values (if (and pathname (file-exists? pathname)) 'forbidden 'not-found) #f #f)))))))
 
-(define (xhtml-page port base-url title sxml)
+(define (xhtml-page port base-url head sxml)
   (define (static name)
     (string-append base-url "static/" name))
   (sxml->xml
@@ -485,7 +521,7 @@
           (head
            (meta (^ (name "GENERATOR")
                     (content "IRClogs by Andreas Rottmann, based on code by MJ Ray")))
-           (title ,title)
+           ,@head
            (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
                     (href ,(static "common.css"))))
            (link (^ (rel "stylesheet") (type "text/css") (charset "utf-8") (media "all")
@@ -499,7 +535,8 @@
                    (string-substitute ".n<0> { background: #<1> }\n"
                                       (list x (integer->color x))
                                       'abrackets))
-                 '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26))))))
+                 '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26)))))
+           )
           (body ,@sxml))
    port))
 

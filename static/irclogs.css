@@ -29,6 +29,18 @@ h1, h2 {
     padding-right: 1em;
 }
 
+#options {
+    float: right;
+    width: 100%;
+    text-align: right;
+    padding: 1em;
+}
+
+#options span {
+    padding-left: 1em;
+    padding-right: 1em;
+}
+
 #timing {
     text-align: center;
     padding: 1em;
