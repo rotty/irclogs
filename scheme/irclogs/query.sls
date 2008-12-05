@@ -24,18 +24,39 @@
 ;;; Code:
 
 (library (irclogs query)
-  (export parse-query)
+  (export query->search
+
+          search-base-date
+          search-n-days
+          search-match-expr
+          search-matcher
+
+          match-expr-label
+          match-expr-tag
+          match-expr-children
+          match-expr-matcher)
   (import (rnrs)
           (xitomatl srfi and-let*)
           (xitomatl irregex)
+          (spells receive)
           (only (spells lists) any unfold filter-map)
           (only (spells strings) string-contains)
           (spells alist)
           (spells misc)
+          (spells tracing)
           (irclogs parse)
           (irclogs utils))
 
-  (define (parse-query q base-date n-days)
+  (define-record-type search
+    (fields base-date n-days match-expr))
+
+  (define (search-matcher search)
+    (match-expr-matcher (search-match-expr search)))
+
+  (define-record-type match-expr
+    (fields label tag children matcher))
+
+  (define (query->search q base-date n-days)
     (let ((parts
            (let ((port (open-string-input-port q)))
              (let loop ((i 0) (parts '()))
@@ -55,49 +76,80 @@
                     (null? (cddr part))
                     (cadr part)))
              parts))
-      (values (or (and-let* ((d (parts-ref 'date)))
-                    (parse-date d))
-                  base-date)
-              (or (and-let* ((d (parts-ref 'days)))
-                    (and (integer? d) d))
-                  n-days)
-              (query-parts->matcher parts))))
+      (make-search
+       (or (and-let* ((d (parts-ref 'date)))
+                      (parse-date d))
+                    base-date)
+       (or (and-let* ((d (parts-ref 'days)))
+             (and (integer? d) d))
+           n-days)
+       (query-parts->match-expr parts))))
 
-  (define (query-parts->matcher parts)
-    (define (->str x)
-      (cond ((symbol? x) (symbol->string x))
-            ((string? x) x)
-            (else        #f)))
-    (define (msg-str-matcher s)
-      (lambda (entry)
-        (string-contains (irc-log-entry-message entry) s)))
-    (define (msg-irx-matcher x)
-      (guard (c (#t #f))
-        (let ((irx (irregex x)))
+  (define (labeled-match-exprs first-label lst)
+    (let loop ((match-exprs '()) (i first-label) (lst lst))
+      (define (handle-leaf match-expr)
+        (if match-expr
+            (loop (cons match-expr match-exprs) (+ i 1) (cdr lst))
+            (loop match-exprs i (cdr lst))))
+      (if (null? lst)
+          (values i (reverse match-exprs))
+          (cond ((and (pair? (car lst))
+                      (pair? (cdar lst))
+                      (null? (cddar lst)))
+                 (case (caar lst)
+                   ((rx)   (handle-leaf (msg-rx-match-expr i (cadar lst))))
+                   ((nick) (handle-leaf (nick-str-match-expr i (cadar lst))))
+                   (else   (loop match-exprs i (cdr lst)))))
+                ((->str (car lst))
+                 => (lambda (s)
+                      (handle-leaf (msg-str-match-expr i s))))
+                (else
+                 (loop match-exprs i (cdr lst)))))))
+
+  (define (query-parts->match-expr parts)
+    (receive (next-label children) (labeled-match-exprs 0 parts)
+      (make-match-expr
+       'and
+       #f
+       children
+       (let ((submatchers (map match-expr-matcher children)))
+         (lambda (entry)
+           (and-map (lambda (match)
+                      (match entry))
+                    submatchers))))))
+
+  (define (msg-str-match-expr label s)
+    (and (string? s)
+         (make-match-expr
+          label
+          'string
+          (list s)
           (lambda (entry)
-            (irregex-search irx (irc-log-entry-message entry))))))
-    (define (nick-str-matcher x)
-      (and-let* ((s (->str x)))
-        (lambda (entry)
-          (and-let* ((nick (irc-log-entry-nick entry)))
-            (string=? nick s)))))
-    (let ((submatchers (filter-map (lambda (part)
-                                     (cond ((pair? part)
-                                            (case (car part)
-                                              ((rx)
-                                               (msg-irx-matcher (cadr part)))
-                                              ((nick)
-                                               (nick-str-matcher (cadr part)))
-                                              (else
-                                               #f)))
-                                           ((->str part)
-                                            => (lambda (s)
-                                                 (msg-str-matcher s)))))
-                                   parts)))
-      (lambda (entry)
-        (and-map (lambda (match)
-                   (match entry))
-                 submatchers))))
+            (string-contains (irc-log-entry-message entry) s)))))
+
+  (define (msg-rx-match-expr label x)
+    (guard (c (#t #f))
+      (let ((irx (irregex x)))
+        (make-match-expr
+         label
+         'rx
+         (list x)
+         (lambda (entry)
+           (irregex-search irx (irc-log-entry-message entry)))))))
+
+  (define (nick-str-match-expr label x)
+    (and-let* ((s (->str x)))
+      (make-match-expr
+       label
+       'nick
+       (list x)
+       (lambda (entry)
+         (and-let* ((nick (irc-log-entry-nick entry)))
+           (string=? nick s))))))
+
+  (define (->str x)
+    (cond ((symbol? x) (symbol->string x))
+          ((string? x) x)
+          (else        #f)))
 
   )
-

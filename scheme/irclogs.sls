@@ -816,7 +816,7 @@
             (transcoded-port (open-file-input-port (x->namestring path)) (native-transcoder))))))
 
   (define-method (*irclogs* %render-search-task self resend tag channel base-date q)
-    (receive (base-date n-days match?) (parse-query q base-date (self 'search-n-days))
+    (let ((search (query->search q base-date (self 'search-n-days))))
       `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
         ,(search-form (self 'base-url) tag channel)
         (table
@@ -824,11 +824,7 @@
          (task ,(lambda (port)
                   (let ((timer (start-timer)))
                     (receive (day-count msg-count)
-                             (self %day-range-search-task
-                                   port tag channel
-                                   (date+days base-date 1)
-                                   (date+days base-date (- n-days))
-                                   match?)
+                             (self %day-range-search-task port tag channel search)
                       `(div (^ (id "timing"))
                             ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
                                      msg-count
@@ -837,12 +833,12 @@
         (task-result)
         ,(footer self))))
 
-  (define-method (*irclogs* %day-range-search-task self resend
-                            port tag channel start-date end-date match?)
+  (define-method (*irclogs* %day-range-search-task self resend port tag channel search)
     (let ((base-url (self 'base-url)))
       (fold-days-between
-       start-date
-       end-date
+       (date+days (search-base-date search) 1) ;; from base-date at 24:00
+       (date+days (search-base-date search)
+                  (- (search-n-days search)))  ;; back to (- base-date n-days) at 0:00
        (lambda (date day-count msg-count)
          (values
           (+ day-count 1)
@@ -852,7 +848,7 @@
                 (log-search-task (day-link base-url tag channel date (unparse-date date))
                                  port
                                  log-port
-                                 match?))
+                                 (search-matcher search)))
               0))))
        0 0)))
 
