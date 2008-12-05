@@ -361,19 +361,20 @@
              (input (^ (type "submit") (name "search-btn") (value "Search"))))))
 
   (define (channel-monthly-table base-url tag channel n-columns days prop-vec start end)
-    `(table
-      (^ (class "mactivity"))
-      ,@(let loop ((markup '()) (i start))
-          (if (>= i end)
-              (reverse markup)
-              (let* ((n-vals (min n-columns (- end i)))
-                     (n-empty (* 2 (- n-columns n-vals))))
-                (loop (append
-                       `((tr ,@(channel-days-tds base-url tag channel #t days prop-vec
-                                                 i (+ i n-vals) #t)
-                             ,@(make-list n-empty '(td))))
-                       markup)
-                      (+ i n-columns)))))))
+    (let ((count (exact (truncate (ceiling (/ (- end start) n-columns))))))
+      `(table
+        (^ (class "mactivity"))
+        ,@(let loop ((markup '()) (i start))
+            (if (>= i end)
+                (reverse markup)
+                (let* ((n-vals (min n-columns (- end i)))
+                       (n-empty (if (= count 1) 0 (* 2 (- n-columns n-vals)))))
+                  (loop (append
+                         `((tr ,@(channel-days-tds base-url tag channel #t days prop-vec
+                                                   i (+ i n-vals) #t)
+                               ,@(make-list n-empty '(td))))
+                         markup)
+                        (+ i n-columns))))))))
 
   (define (log-search-task heading port log-port match?)
     (receive (msg-count first?)
