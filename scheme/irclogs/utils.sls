@@ -23,8 +23,16 @@
 
 (library (irclogs utils)
   (export
+
    make-timer start-timer
+
+   time-*
    date-with-zone-offset
+   mk-date
+   date+days date+days->time-utc
+   parse-date unparse-date
+   fold-days-between
+
    current-yield yield/c
 
    make-scheduler scheduler? scheduler-work scheduler-enqueue!
@@ -70,6 +78,9 @@
       (timer 'start)
       timer))
 
+  (define (time-* n time)
+    (make-time (time-type time) (* n (time-nanosecond time)) (* n (time-second time))))
+
   (define (date-with-zone-offset date tz-offset)
     (make-date (date-nanosecond date)
                (date-second date)
@@ -79,6 +90,41 @@
                (date-month date)
                (date-year date)
                tz-offset))
+
+  (define (mk-date year month day)
+    (make-date 0 0 0 0 day month year 0))
+
+  (define *one-day* (make-time time-duration 0 (* 24 60 60)))
+
+  (define (date+days->time-utc date n-days)
+    (let ((step (time-* n-days *one-day*)))
+      (add-duration (date->time-utc date) step)))
+
+  (define (date+days date n-days)
+    (time-utc->date (date+days->time-utc date n-days) 0))
+
+  (define isodate-fmt "~Y-~m-~d")
+
+  (define (unparse-date date)
+    (date->string date isodate-fmt))
+
+  (define (parse-date s)
+    (guard (c (#t #f))
+      (date-with-zone-offset (string->date s isodate-fmt) 0)))
+
+  (define (fold-days-between start-day end-day proc . seeds)
+    (let* ((start (date->time-utc start-day))
+           (end (add-duration (date->time-utc end-day) *one-day*)))
+      (receive (step time-cmp?)
+               (if (time<? start end)
+                   (values *one-day* time>=?)
+                   (values (time-* -1 *one-day*) time<=?))
+        (let loop ((cur start) (seeds seeds))
+          (if (time-cmp? cur end)
+              (apply values seeds)
+              (let ((cur-date (time-utc->date cur 0)))
+                (loop (add-duration cur step)
+                      (receive new-seeds (apply proc cur-date seeds) new-seeds))))))))
 
   (define current-yield (make-parameter #f))
 

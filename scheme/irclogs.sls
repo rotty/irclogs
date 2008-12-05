@@ -25,6 +25,7 @@
           (prometheus)
           (sxml simple)
           (irclogs parse)
+          (irclogs query)
           (irclogs utils))
 
   (define (merge-state state changed-logs)
@@ -199,11 +200,6 @@
                       (day . ,(num->str (date-day date) 2)))
                     template))
 
-  (define (parse-date s)
-    (guard (c (#t (values #f #f #f)))
-      (let ((date (string->date s "~Y-~m-~d")))
-        (values (date-year date) (date-month date) (date-day date)))))
-
   (define (msum numbers) ; (int ...) -> int
     (if (null? numbers)
         0
@@ -283,10 +279,6 @@
     (receive (count markup)
              (fold-log-file/shtml port (lambda (shtml markup) (cons shtml markup)) '())
       `(table (^ (class "log")) ,@(reverse markup))))
-
-  (define (q->matcher q)
-    (lambda (entry)
-      (string-contains (irc-log-entry-message entry) q)))
 
   (define (footer self)
     `(div (^ (id "foot"))
@@ -404,7 +396,7 @@
               `(span ,(base-link base-url)
                      " > " ,(tag-link base-url tag)
                      " > " ,(channel-link base-url tag channel)
-                     " > " ,(last-link day-link base-url tag channel date (isodate-str date))))
+                     " > " ,(last-link day-link base-url tag channel date (unparse-date date))))
              ((and tag channel)
               `(span ,(base-link base-url)
                      " > " ,(tag-link base-url tag)
@@ -433,11 +425,11 @@
       ((base-url tag channel date text attrs)
        `(a (^ (href ,(string-append
                       (url-escape (ssubst "{0}{1}/{2}/" base-url tag channel) "/")
-                      "?date=" (isodate-str date)))
+                      "?date=" (unparse-date date)))
               ,@attrs)
            ,text))
       ((base-url tag channel date)
-       (date-link base-url tag channel date (isodate-str date) '()))))
+       (date-link base-url tag channel date (unparse-date date) '()))))
 
   (define (day-link base-url tag channel date text)
     `(a (^ (href ,(day-url base-url tag channel date))) ,text))
@@ -446,7 +438,7 @@
     (url-escape (ssubst "{0}{1}/{2}/{3}/"
                                       base-url
                                       tag channel
-                                      (isodate-str date))
+                                      (unparse-date date))
                               "/"))
 
   (define url-escape
@@ -555,8 +547,6 @@
                          (drop entry 3))))
                 state))
 
-  (define *one-day* (make-time time-duration 0 (* 24 60 60)))
-
   (define (days-between start-day end-day)
     (define (day->date day)
       (make-date 0 0 0 0 (caddr day) (cadr day) (car day) 0))
@@ -565,20 +555,6 @@
                          (cons (list (date-year date) (date-month date) (date-day date))
                                days))
                        '()))
-
-  (define (fold-days-between start-day end-day proc . seeds)
-    (let* ((start (date->time-utc start-day))
-           (end (add-duration (date->time-utc end-day) *one-day*)))
-      (receive (step time-cmp?)
-               (if (time<? start end)
-                   (values *one-day* time>=?)
-                   (values (time-* -1 *one-day*) time<=?))
-        (let loop ((cur start) (seeds seeds))
-          (if (time-cmp? cur end)
-              (apply values seeds)
-              (let ((cur-date (time-utc->date cur 0)))
-                (loop (add-duration cur step)
-                      (receive new-seeds (apply proc cur-date seeds) new-seeds))))))))
 
   (define (sexp->matcher expr)
     (define (submatcher mapper)
@@ -621,35 +597,10 @@
           (else
            '())))
 
-  (define (date+days->time-utc date n-days)
-    (let ((step (time-* n-days *one-day*)))
-      (add-duration (date->time-utc date) step)))
-
   (define (query-date query)
     (let ((val (assq-ref query 'date)))
       (and val
-           (irregex-match isodate-rx val)
-           (date-with-zone-offset (string->date val isodate-fmt) 0))))
-
-  (define isodate-fmt "~Y-~m-~d")
-  (define isodate-rx (irregex '(: (>= 4 digit) "-" (** 1 2 digit) "-" (** 1 2 digit))))
-
-  (define (time-* n time)
-    (make-time (time-type time) (* n (time-nanosecond time)) (* n (time-second time))))
-
-  (define (mk-date year month day)
-    (make-date 0 0 0 0 day month year 0))
-
-  (define (date+days date n-days)
-    (time-utc->date (date+days->time-utc date n-days) 0))
-
-  (define (isodate-str date)
-    (date->string date isodate-fmt))
-
-  (define (sign x)
-    (cond ((< x 0) -1)
-          ((= x 0)  0)
-          (else     1)))
+           (parse-date val))))
 
 ;;; Code following uses the Prometheus object system
 
@@ -670,6 +621,7 @@
     %get-state
     %set-base-url! %set-homepage-url!
     %matcher %set-matcher!
+    %set-search-n-days!
     %render-multi-overview/html
     %render-channel-overview/html
     %render-search-task
@@ -689,6 +641,7 @@
                     ((base-url)   (logs %set-base-url! (cadr entry)))
                     ((homepage-url) (logs %set-homepage-url! (cadr entry)))
                     ((match)      (logs %set-matcher! (sexp->matcher (cadr entry))))
+                    ((search-n-days) (logs %set-search-n-days! (cadr entry)))
                     (else
                      (error 'make-irclogs "unknown option" entry))))
                 options)
@@ -701,7 +654,7 @@
                         (else                7))))
       (cond
        ((and tag channel (assq-ref query 'q))
-        => (lambda (q) (self %render-search-task tag channel base-date 14 q)))
+        => (lambda (q) (self %render-search-task tag channel base-date q)))
        (else
         (let ((state (self %get-state tag channel base-date n-days)))
           (receive (days rows)
@@ -758,11 +711,10 @@
            (days-month-borders days)))))
 
   (define-method (*irclogs* 'render-log/html self resend just-meta? tag channel date-str)
-    (receive (year month day) (parse-date date-str)
-      (and year month day
-           (let ((base-url (self 'base-url))
-                 (date (mk-date year month day)))
-             (and-let* ((port (self 'open-log-file tag channel (mk-date year month day))))
+    (let ((date (parse-date date-str)))
+      (and date
+           (let ((base-url (self 'base-url)))
+             (and-let* ((port (self 'open-log-file tag channel date)))
                (call-with-port port
                  (lambda (port)
                    `((meta (js-include "jquery.js")
@@ -863,23 +815,27 @@
             (file-readable? path)
             (transcoded-port (open-file-input-port (x->namestring path)) (native-transcoder))))))
 
-  (define-method (*irclogs* %render-search-task self resend tag channel base-date n-days q)
-    `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
-      (table
-       (^ (class "log"))
-       (task ,(lambda (port)
-                (let ((timer (start-timer)))
-                  (receive (day-count msg-count)
-                           (self %day-range-search-task
-                                 port tag channel base-date (date+days base-date (- n-days))
-                                 (q->matcher q))
-                    `(div (^ (id "timing"))
-                          ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
-                                   msg-count
-                                   day-count
-                                   (fmt #f (num (inexact (timer)) 10 4)))))))))
-      (task-result)
-      ,(footer self)))
+  (define-method (*irclogs* %render-search-task self resend tag channel base-date q)
+    (receive (base-date n-days match?) (parse-query q base-date (self 'search-n-days))
+      `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
+        ,(search-form (self 'base-url) tag channel)
+        (table
+         (^ (class "log"))
+         (task ,(lambda (port)
+                  (let ((timer (start-timer)))
+                    (receive (day-count msg-count)
+                             (self %day-range-search-task
+                                   port tag channel
+                                   (date+days base-date 1)
+                                   (date+days base-date (- n-days))
+                                   match?)
+                      `(div (^ (id "timing"))
+                            ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
+                                     msg-count
+                                     day-count
+                                     (fmt #f (num (inexact (timer)) 10 4)))))))))
+        (task-result)
+        ,(footer self))))
 
   (define-method (*irclogs* %day-range-search-task self resend
                             port tag channel start-date end-date match?)
@@ -893,7 +849,7 @@
           (+ msg-count
              (or
               (and-let* ((log-port (self 'open-log-file tag channel date)))
-                (log-search-task (day-link base-url tag channel date (isodate-str date))
+                (log-search-task (day-link base-url tag channel date (unparse-date date))
                                  port
                                  log-port
                                  match?))
@@ -906,7 +862,7 @@
           (loc (string-concatenate (append (if tag (list tag "/") '())
                                            (if channel (list channel "/"))))))
       (define (date-link date text)
-        (let ((url (url-escape (ssubst "{0}{1}?date={2}" (self 'base-url) loc (isodate-str date))
+        (let ((url (url-escape (ssubst "{0}{1}?date={2}" (self 'base-url) loc (unparse-date date))
                                "/?=")))
           `(a (^ (href ,url)) ,text)))
       `(div (^ (id "nav"))
@@ -918,7 +874,7 @@
           (prev-date (date+days date -1))
           (loc (string-append tag "/" channel "/")))
       (define (date-link date text)
-        (let ((url (url-escape (string-append (self 'base-url) loc (isodate-str date) "/") "/")))
+        (let ((url (url-escape (string-append (self 'base-url) loc (unparse-date date) "/") "/")))
           `(a (^ (href ,url)) ,text)))
       `(div (^ (id "nav"))
             ,(date-link next-date "<<")
@@ -931,5 +887,6 @@
   (*irclogs* 'add-value-slot! 'base-url %set-base-url! "/")
   (*irclogs* 'add-value-slot! 'homepage-url %set-homepage-url! "/static/irclogs.html")
   (*irclogs* 'add-value-slot! %matcher %set-matcher! #f)
+  (*irclogs* 'add-value-slot! 'search-n-days %set-search-n-days! 14)
 
   )

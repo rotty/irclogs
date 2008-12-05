@@ -28,4 +28,9 @@
   ("utils.scm"
    (spells receive)
    (only (spells assert) cout)
-   (irclogs utils))))
+   (irclogs utils))
+  ("query.scm"
+   (spells receive)
+   (irclogs utils)
+   (irclogs parse)
+   (irclogs query))))

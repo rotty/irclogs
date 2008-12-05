@@ -6,7 +6,7 @@ lang="en" xml:lang="en">
 <title>irclogs</title>
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
 <meta name="generator" content="Org-mode"/>
-<meta name="generated" content="2008-12-04 23:40:29 CET"/>
+<meta name="generated" content="2008-12-05 05:58:10 CET"/>
 <meta name="author" content="Andreas Rottmann"/>
 <style type="text/css">
 /* <![CDATA[ */
@@ -98,22 +98,15 @@ query option (JavaScript part already implemented)
 
 </li>
 <li>
-Allow selecting a base date for overviews, which will also allow
-shifting the default search base date
-
-</li>
-<li>
 Improve search:
 
 <ul>
 <li>
+Interrupt search after consuming a configured amount of time, with
+option to resume
+</li>
+<li>
 Links directly to log at the times of the hits
-</li>
-<li>
-Regex matches
-</li>
-<li>
-Specify nicks to match
 </li>
 <li>
 Specify amount of context around a message to show
@@ -123,9 +116,28 @@ Allow explicitly specifying base date
 </li>
 <li>
 Highlight matches
+</li>
+<li>
+Allow toggling of events on search result pages as well
+</li>
+<li>
+Carry search string to the result page
+</li>
+<li>
+Feedback on the interpretation of the query: What base date and
+day count was used, what matchers where constructed
 
 </li>
 </ul>
+</li>
+<li>
+Allow a single instance to offer several (possibly overlapping) sets
+of channels on different ports. This is useful if you want to run an
+IRClogs instance serving your logs, and want to have a "public
+view", presented to the interweb, and a "private view" that you
+restrict access to via HTTP authentication, IP address or some other
+mechanism.
+
 </li>
 </ul>
 </div>
@@ -151,20 +163,85 @@ the GNOME and freenode networks.
 <div id="text-1.4">
 
 
+
+</div>
+
+<div id="outline-container-1.4.1" class="outline-4">
+<h4 id="sec-1.4.1">Searching </h4>
+<div id="text-1.4.1">
+
+
 <p>
-Currently, there's no documentation real documentation for IRClogs,
-neither how to set an instance up, nor how to use the web interface
-(which should be pretty self-explanatory), so if you have questions,
-after having a look at the <a href="http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=headblob;f=/README">README</a>, and taking a look at the <a href="http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=summary">Source</a> (if
-you're brave ;-)) I usually hang out on <a href="http://rottyforge.yi.org/irclogs/freenode/%23scheme/">irc://freenode/#scheme</a> as
-<code>rotty</code> &ndash; just send me a ping, but don't hold your breadth.
+A search always has a "base date", and a number of days it reaches
+backwards; both have default values:
+</p>
+<ul>
+<li>
+The "base date" defaults to the current date, if no <code>date</code> query
+option is given in the URL, which is the case when you initially
+enter a channel activity overview page. If you use the navigation
+links or the "pin" links presented for each day to navigate to
+another day, that changes the base date to the corresponding day.
+
+</li>
+<li>
+The number of days searched by default is 14, this option can be
+changed in the configuration file.
+
+</li>
+</ul>
+
+<p>The phrase (interpreted as character string) entered into the search
+field is parsed into a list of "search parameters" according to the
+following rules:
+</p>
+<ul>
+<li>
+As long as possible, an item is consumed from the string by using
+the Scheme procedure for reading a datum (<a href="http://www.schemers.org/Documents/Standards/R5RS/HTML/r5rs-Z-H-9.html#%_idx_612">R5RS read</a>, <a href="http://www.r6rs.org/final/html/r6rs-lib/r6rs-lib-Z-H-9.html#node_idx_708">R6RS get-datum</a>). If parsing fails at some point, the entire remainder of
+the string is consumed a single item. This step results in a list of
+Scheme datums. For example:
+
+<ul>
+<li>
+<code>foo bar "hello world" 42</code> results in the list <code>(foo bar "hello     world" 42)</code>.
+
+</li>
+<li>
+<code>(date "2008-10-26") (days 42) foo)</code> results in the list <code>((date     "2008-10-26") (days 42) "foo) 123")</code>.
+
+</li>
+</ul>
+</li>
+<li id="sec-1.4.1.1"><span class="todo">TODO</span> : Finish this section <br/>
+
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+
+<div id="outline-container-1.5" class="outline-3">
+<h3 id="sec-1.5">Support </h3>
+<div id="text-1.5">
+
+
+<p>
+Currently, there's no documentation on how to set up an IRClogs
+instance, so if you have questions about that or anything else, want
+to help out, or think you have found a bug, or want to provide any
+other kind of feedback, after having a look at the <a href="http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=headblob;f=/README">README</a>, and taking
+a look at the <a href="http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=summary">Source</a> (if you're brave ;-)) I usually hang out on
+<a href="http://rottyforge.yi.org/irclogs/freenode/%23scheme/">irc://freenode/#scheme</a> as <code>rotty</code> &ndash; just send me a ping, but don't
+hold your breadth.
 </p></div>
 </div>
 </div>
 <div id="postamble"><p class="author"> Author: Andreas Rottmann
 <a href="mailto:a.rottmann@gmx.at">&lt;a.rottmann@gmx.at&gt;</a>
 </p>
-<p class="date"> Date: 2008-12-04 23:40:29 CET</p>
+<p class="date"> Date: 2008-12-05 05:58:10 CET</p>
 <p>HTML generated by org-mode 6.13trans in emacs 22</p>
 </div></body>
 </html>

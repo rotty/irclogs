@@ -23,7 +23,8 @@
 
 
 (library (irclogs parse)
-  (export irc-log-entry-hours
+  (export make-irc-log-entry
+          irc-log-entry-hours
           irc-log-entry-minutes
           irc-log-entry-seconds
           irc-log-entry-type
