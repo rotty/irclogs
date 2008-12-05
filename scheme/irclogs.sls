@@ -360,17 +360,6 @@
              (br)
              (input (^ (type "submit") (name "search-btn") (value "Search"))))))
 
-  (define (render-channel-overview/html base-url tag channel days prop-vec)
-    `((h1 ,(breadcrumbs base-url tag channel #f))
-      ,(search-form base-url tag channel)
-      ,@(append-map
-         (lambda (month-borders)
-           (receive (year month day) (apply values (vector-ref days (car month-borders)))
-             (list `(h2 ,(month-string (mk-date year month day)))
-                   (channel-monthly-table base-url tag channel 7 days prop-vec
-                                          (car month-borders) (cdr month-borders)))))
-         (days-month-borders days))))
-
   (define (channel-monthly-table base-url tag channel n-columns days prop-vec start end)
     `(table
       (^ (class "mactivity"))
@@ -681,6 +670,7 @@
     %set-base-url! %set-homepage-url!
     %matcher %set-matcher!
     %render-multi-overview/html
+    %render-channel-overview/html
     %render-search-task
     %day-range-search-task
     %activity-nav-links
@@ -723,7 +713,7 @@
                      #f)
                     ((and tag channel)
                      (assert (= n-rows 1))
-                     (render-channel-overview/html base-url tag channel days (cadar rows)))
+                     (self %render-channel-overview/html tag channel days (cadar rows)))
                     (else
                      (self %render-multi-overview/html
                            tag channel (or (query-date query) (current-date 0)) days rows))))))))))
@@ -751,6 +741,20 @@
                                                    (cadr row) 0 n-days))))
                       rows)))
              ,(footer self)))))
+
+  (define-method (*irclogs* %render-channel-overview/html self resend tag channel days prop-vec)
+    (let ((base-url (self 'base-url)))
+      `((h1 ,(breadcrumbs base-url tag channel #f))
+        ,(search-form base-url tag channel)
+        ,(self %activity-nav-links tag channel
+               (apply mk-date (vector-ref days 0)) (vector-length days) 365)
+        ,@(append-map
+           (lambda (month-borders)
+             (receive (year month day) (apply values (vector-ref days (car month-borders)))
+               (list `(h2 ,(month-string (mk-date year month day)))
+                     (channel-monthly-table base-url tag channel 7 days prop-vec
+                                            (car month-borders) (cdr month-borders)))))
+           (days-month-borders days)))))
 
   (define-method (*irclogs* 'render-log/html self resend just-meta? tag channel date-str)
     (receive (year month day) (parse-date date-str)
