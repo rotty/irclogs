@@ -30,7 +30,7 @@
         (spells alist)
         (spells table)
         (only (spells strings) string-join string-concatenate)
-        (only (spells lists) unfold drop filter-map)
+        (only (spells lists) unfold drop filter-map iota)
         (spells string-substitute)
         (spells pathname)
         (spells filesys)
@@ -373,10 +373,12 @@
                    ((or (not last-proc) first-escape?)
                     (set! first-escape? #f)
                     (when (not last-proc)
-                      (close-output-port tport)))
+                      (close-output-port tport))
+                    ;; This the (only) exit point of this procedure
+                    )
                    (else
                     ;; we have some not-finished tasks, and it's not the
-                    ;; first escape
+                    ;; first escape, so we go on working
                     (work-k))))))))))
 
 (define (handle-page base-url msg code title defer proc . args)
@@ -535,7 +537,13 @@
                    (string-substitute ".n<0> { background: #<1> }\n"
                                       (list x (integer->color x))
                                       'abrackets))
-                 '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26)))))
+                 (iota 27))
+                (map
+                 (lambda (x)
+                   (string-substitute ".me-l<0> { background: #<1> }\n"
+                                      (list x (integer->color x))
+                                      'abrackets))
+                 (iota 10)))))
            )
           (body ,@sxml))
    port))

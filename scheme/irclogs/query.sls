@@ -31,19 +31,22 @@
           search-match-expr
           search-matcher
 
-          match-expr-label
+          match-expr-id
           match-expr-tag
           match-expr-children
-          match-expr-matcher)
+          match-expr-matcher
+
+          match-expr->shtml)
   (import (rnrs)
           (xitomatl srfi and-let*)
           (xitomatl irregex)
           (spells receive)
           (only (spells lists) any unfold filter-map)
-          (only (spells strings) string-contains)
+          (only (spells strings) string-contains string-join)
           (spells alist)
           (spells misc)
           (spells tracing)
+          (fmt)
           (irclogs parse)
           (irclogs utils))
 
@@ -54,7 +57,7 @@
     (match-expr-matcher (search-match-expr search)))
 
   (define-record-type match-expr
-    (fields label tag children matcher))
+    (fields id tag children matcher))
 
   (define (query->search q base-date n-days)
     (let ((parts
@@ -85,8 +88,8 @@
            n-days)
        (query-parts->match-expr parts))))
 
-  (define (labeled-match-exprs first-label lst)
-    (let loop ((match-exprs '()) (i first-label) (lst lst))
+  (define (match-exprs/ids first-id lst)
+    (let loop ((match-exprs '()) (i first-id) (lst lst))
       (define (handle-leaf match-expr)
         (if match-expr
             (loop (cons match-expr match-exprs) (+ i 1) (cdr lst))
@@ -107,10 +110,10 @@
                  (loop match-exprs i (cdr lst)))))))
 
   (define (query-parts->match-expr parts)
-    (receive (next-label children) (labeled-match-exprs 0 parts)
+    (receive (next-id children) (match-exprs/ids 0 parts)
       (make-match-expr
-       'and
        #f
+       'and
        children
        (let ((submatchers (map match-expr-matcher children)))
          (lambda (entry)
@@ -118,29 +121,29 @@
                       (match entry))
                     submatchers))))))
 
-  (define (msg-str-match-expr label s)
+  (define (msg-str-match-expr id s)
     (and (string? s)
          (make-match-expr
-          label
-          'string
+          id
+          #f
           (list s)
           (lambda (entry)
             (string-contains (irc-log-entry-message entry) s)))))
 
-  (define (msg-rx-match-expr label x)
+  (define (msg-rx-match-expr id x)
     (guard (c (#t #f))
       (let ((irx (irregex x)))
         (make-match-expr
-         label
+         id
          'rx
          (list x)
          (lambda (entry)
            (irregex-search irx (irc-log-entry-message entry)))))))
 
-  (define (nick-str-match-expr label x)
+  (define (nick-str-match-expr id x)
     (and-let* ((s (->str x)))
       (make-match-expr
-       label
+       id
        'nick
        (list x)
        (lambda (entry)
@@ -151,5 +154,34 @@
     (cond ((symbol? x) (symbol->string x))
           ((string? x) x)
           (else        #f)))
+
+
+;;; UI/HTML-related functionality follows
+  
+  (define (match-expr->shtml m)
+    (define (children-shtml)
+      (map match-expr->shtml (match-expr-children m)))
+    (define (children-text)
+      (string-join (map (lambda (child)
+                          (fmt #f (wrt child)))
+                        (match-expr-children m))
+                   " "))
+    (define (shtml-list)
+      (cond ((and (not (match-expr-id m)) (match-expr-tag m))
+             => (lambda (tag)
+                  `(("(" ,tag " " ,@(children-shtml) ")"))))
+            ((match-expr-tag m)
+             => (lambda (tag)
+                  `(("(" ,tag " " ,(children-text) ")"))))
+            (else (list (children-text)))))
+    (cond ((match-expr-id m)
+           => (lambda (id)
+                `(span (^ (class ,(id->css-class id)))
+                       ,@(shtml-list))))
+          (else
+           (shtml-list))))
+
+  (define (id->css-class id)
+    (string-append "me-l" (number->string (mod id 10))))
 
   )

@@ -819,6 +819,8 @@
     (let ((search (query->search q base-date (self 'search-n-days))))
       `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
         ,(search-form (self 'base-url) tag channel)
+        (div (^ (id "search-desc"))
+             "Searching for " (code ,@(match-expr->shtml (search-match-expr search))))
         (table
          (^ (class "log"))
          (task ,(lambda (port)
