@@ -45,15 +45,17 @@
         (sbank soup)
         (sbank typelib)
         (sbank ctypes basic)
+        (irclogs libdaemon)
         (irclogs utils)
         (irclogs))
 
 (soup-setup!)
 (typelib-import
  (prefix (only ("GLib" #f)
+               <i-o-condition> ;; theoretically not needed, see use below
                thread-init
                main-loop-new main-loop-run
-               timeout-add-seconds idle-add
+               timeout-add-seconds idle-add io-add-watch io-channel-unix-new
                markup-escape-text)
          g-)
  (prefix (only ("Soup" #f) <server> status-get-phrase)
@@ -109,8 +111,29 @@
       (set! counter (+ counter 1))
       counter)))
 
+(define (install-signal-handler sigs proc)
+  (apply daemon-signal-init sigs)
+  (let ((io (g-io-channel-unix-new (daemon-signal-fd))))
+    (g-io-add-watch io
+                    ;; this explicit conversion would be unnecessary
+                    ;; if the GIOCondition would be marked as a flags
+                    ;; type in the typelib; need to fix in gobject-introspection
+                    (gflags->integer <g-i-o-condition> '(in err hup))
+                    (lambda (source condition user-data)
+                      (cond ((eq? 'in condition) ;; also a workaround, should be (equal? '(in) ...)
+                             (do ((sig (daemon-signal-next) (daemon-signal-next)))
+                                 ((= sig 0))
+                               (proc sig))
+                             #t)
+                            (else
+                             (bail-out "unexpected condition on signal fd: {0}"
+                                       condition)))))))
+
 (define (irclog-httpd config)
   (g-thread-init #f)
+  (install-signal-handler '(int) (lambda (sig)
+                                   (println "Received signal {0}, exiting" sig)
+                                   (exit 1)))
   (let ((port (car (assq-ref config 'port))))
     (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
       (let ((server (send <soup-server> (new/props 'port port
@@ -569,7 +592,8 @@
      (list-ref colors (list-ref nb 2)))))
 
 (define (bail-out msg . args)
-  (string-substitute (current-error-port) msg args)
-  (newline (current-error-port)))
+  (string-substitute (current-error-port) msg args 'braces)
+  (newline (current-error-port))
+  (exit 1))
 
 (main (command-line))
