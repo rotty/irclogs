@@ -52,7 +52,6 @@
 (soup-setup!)
 (typelib-import
  (prefix (only ("GLib" #f)
-               <i-o-condition> ;; theoretically not needed, see use below
                thread-init
                main-loop-new main-loop-run
                timeout-add-seconds idle-add io-add-watch io-channel-unix-new
@@ -115,12 +114,9 @@
   (apply daemon-signal-init sigs)
   (let ((io (g-io-channel-unix-new (daemon-signal-fd))))
     (g-io-add-watch io
-                    ;; this explicit conversion would be unnecessary
-                    ;; if the GIOCondition would be marked as a flags
-                    ;; type in the typelib; need to fix in gobject-introspection
-                    (gflags->integer <g-i-o-condition> '(in err hup))
+                    '(in err hup)
                     (lambda (source condition user-data)
-                      (cond ((eq? 'in condition) ;; also a workaround, should be (equal? '(in) ...)
+                      (cond ((equal? '(in) condition)
                              (do ((sig (daemon-signal-next) (daemon-signal-next)))
                                  ((= sig 0))
                                (proc sig))
@@ -175,7 +171,7 @@
               (println "task {0} enqueued; {1} now active" task-id n-active-tasks)
               (table-set! task-table task-id title)
               (when (not had-work?)
-                (g-idle-add scheduler-idle-callback (integer->pointer 0))))
+                (g-idle-add scheduler-idle-callback)))
             task-id))
         (unless server
           (bail-out "Unable to bind to server port {0}\n" port))
@@ -184,9 +180,8 @@
          60
          (lambda (user-data)
            (irclogs 'update-state)
-           #t)
-         (integer->pointer 0)) ;; Workaround, will go away
-        (g-idle-add scheduler-idle-callback (integer->pointer 0))
+           #t))
+        (g-idle-add scheduler-idle-callback)
         (send server
           (add-handler #f (wrap-handler (irclogs-handler defer-task irclogs)))
           (add-handler "/static/" (wrap-handler
