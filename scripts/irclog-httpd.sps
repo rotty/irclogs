@@ -361,7 +361,7 @@
       ;; task involved (as HTTP 1.0 doesn't support chunked encoding)
       (let ((defer? (and (= http-version 0) last-proc)))
         (values
-         (if defer? 'defer 'ok)
+         (if defer? 'defer code)
          #f
          (lambda ()
            (when (> http-version 0)
