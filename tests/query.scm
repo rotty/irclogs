@@ -33,7 +33,7 @@
 (define (bool x)
   (if x #t #f))
 
-(testeez "query defaulst"
+(testeez "query defaults"
   (test/equal "default propagation" (q-dt "") '("2008-12-05" 42))
   (test/equal "default override (days)" (q-dt "(days 43)") '("2008-12-05" 43)))
 
