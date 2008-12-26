@@ -1,3 +1,5 @@
+#!r6rs
+
 (library (irclogs)
   (export make-irclogs)
   (import (except (rnrs)
@@ -156,6 +158,8 @@
       (and file
            (not (null? (file-types file)))
            (string=? type (last (file-types file))))))
+
+  (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
 
   (define parse-state-pathname
     (let ((rx (sre->irregex `(: (submatch-named year (+ digit)) "-"
@@ -569,8 +573,6 @@
          (lambda (vals)
            (let ((val (assq-ref vals (car expr))))
              (irregex-match rx val)))))))
-
-  (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
 
   (define sre-alist
     `((year . (>= 4 digit))

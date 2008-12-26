@@ -20,6 +20,7 @@
 ;;; Commentary:
 
 ;;; Code:
+#!r6rs
 
 (library (irclogs utils)
   (export

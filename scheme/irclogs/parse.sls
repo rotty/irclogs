@@ -20,7 +20,7 @@
 ;;; Commentary:
 
 ;;; Code:
-
+#!r6rs
 
 (library (irclogs parse)
   (export make-irc-log-entry

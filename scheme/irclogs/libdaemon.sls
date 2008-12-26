@@ -24,7 +24,7 @@
 ;; (and useful) stand-alone, only depending on (spells foreign).
 
 ;;; Code:
-
+#!r6rs
 
 (library (irclogs libdaemon)
   (export daemon-signal-init

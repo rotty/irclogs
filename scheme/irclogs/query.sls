@@ -22,6 +22,7 @@
 ;; This library parses the query string provided by the HTML form.
 
 ;;; Code:
+#!r6rs
 
 (library (irclogs query)
   (export query->search
