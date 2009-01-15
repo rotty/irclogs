@@ -23,9 +23,9 @@
 (import (except (rnrs) delete-file file-exists?)
         (rnrs r5rs)
         (xitomatl srfi and-let*)
-        (spells receive)
-        (only (spells lists) split-at)
-        (only (spells strings)
+        (xitomatl srfi receive)
+        (only (xitomatl srfi lists) split-at)
+        (only (xitomatl srfi strings)
               string-concatenate
               string-concatenate-reverse
               string-fold)

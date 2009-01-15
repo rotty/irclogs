@@ -34,7 +34,7 @@
           parse-irc-log-file)
   (import (rnrs)
           (xitomatl srfi and-let*)
-          (spells receive)
+          (xitomatl srfi receive)
           (spells pathname)
           (spells misc)
           (spells tracing)
