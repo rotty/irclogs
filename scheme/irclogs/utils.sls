@@ -44,7 +44,7 @@
    host-impl-info-shtml
    )
   (import (rnrs)
-          (xitomatl srfi receive)
+          (srfi :8 receive)
           (spells opt-args)
           (spells alist)
           (spells queue)

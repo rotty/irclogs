@@ -22,10 +22,10 @@
 #!r6rs
 (import (except (rnrs) delete-file file-exists?)
         (rnrs r5rs)
-        (xitomatl srfi and-let*)
-        (xitomatl srfi receive)
-        (only (xitomatl srfi lists) split-at)
-        (only (xitomatl srfi strings)
+        (srfi :2 and-let*)
+        (srfi :8 receive)
+        (only (srfi :1 lists) split-at)
+        (only (srfi :13 strings)
               string-concatenate
               string-concatenate-reverse
               string-fold)

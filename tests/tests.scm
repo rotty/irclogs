@@ -26,11 +26,11 @@
 ((systems irclogs)
  (files
   ("utils.scm"
-   (spells receive)
+   (srfi :8 receive)
    (only (spells assert) cout)
    (irclogs utils))
   ("query.scm"
-   (spells receive)
+   (srfi :8 receive)
    (irclogs utils)
    (irclogs parse)
    (irclogs query))))

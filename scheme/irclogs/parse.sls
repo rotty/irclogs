@@ -33,8 +33,8 @@
           fold-irc-log-file
           parse-irc-log-file)
   (import (rnrs)
-          (xitomatl srfi and-let*)
-          (xitomatl srfi receive)
+          (srfi :2 and-let*)
+          (srfi :8 receive)
           (spells pathname)
           (spells misc)
           (spells tracing)
