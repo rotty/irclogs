@@ -627,6 +627,8 @@
     %render-multi-overview/html
     %render-channel-overview/html
     %render-search-task
+    %render-search-footer
+
     %day-range-search-task
     %activity-nav-links
     %log-nav-links)
@@ -825,34 +827,52 @@
              "Searching for " (code ,@(match-expr->shtml (search-match-expr search))))
         (table
          (^ (class "log"))
-         (task ,(lambda (port)
-                  (let ((timer (start-timer)))
-                    (receive (day-count msg-count)
-                             (self %day-range-search-task port tag channel search)
-                      `(div (^ (id "timing"))
-                            ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
-                                     msg-count
-                                     day-count
-                                     (fmt #f (num (inexact (timer)) 10 4)))))))))
+         (task
+          ,(lambda (port)
+             (call/cc
+              (lambda (finish)
+                (let ((timer (start-timer)))
+                  (receive (day-count msg-count)
+                           (self %day-range-search-task port tag channel search
+                                 (lambda (date day-count msg-count)
+                                   (when (>= (timer) (self 'search-timeout))
+                                     (finish (self %render-search-footer
+                                                   day-count msg-count (timer) #t)))))
+                    (self %render-search-footer day-count msg-count (timer) #f))))))))
         (task-result)
         ,(footer self))))
 
-  (define-method (*irclogs* %day-range-search-task self resend port tag channel search)
+  (define-method (*irclogs* %render-search-footer self resend
+                            day-count msg-count seconds cont-search)
+    `(div (^ (id "timing"))
+          ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
+                   msg-count
+                   day-count
+                   (fmt #f (num (inexact seconds) 10 4)))
+          (br)
+          ,@(if cont-search
+                '("Continue interrupted search")
+                '())))
+
+  (define-method (*irclogs* %day-range-search-task self resend
+                            port tag channel search escaper)
     (let ((base-url (self 'base-url)))
       (fold-days-between
        (date+days (search-base-date search) 1) ;; from base-date at 24:00
        (date+days (search-base-date search)
                   (- (search-n-days search)))  ;; back to (- base-date n-days) at 0:00
        (lambda (date day-count msg-count)
+         (escaper date day-count msg-count)
          (values
           (+ day-count 1)
           (+ msg-count
              (or
               (and-let* ((log-port (self 'open-log-file tag channel date)))
-                (log-search-task (day-link base-url tag channel date (unparse-date date))
-                                 port
-                                 log-port
-                                 (search-matcher search)))
+                (log-search-task
+                 (day-link base-url tag channel date (unparse-date date))
+                 port
+                 log-port
+                 (search-matcher search)))
               0))))
        0 0)))
 
@@ -888,5 +908,6 @@
   (*irclogs* 'add-value-slot! 'homepage-url %set-homepage-url! "/static/irclogs.html")
   (*irclogs* 'add-value-slot! %matcher %set-matcher! #f)
   (*irclogs* 'add-value-slot! 'search-n-days %set-search-n-days! 14)
+  (*irclogs* 'add-value-slot! 'search-timeout 2)
 
   )
