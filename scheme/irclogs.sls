@@ -249,12 +249,15 @@
       (irregex-fold link-rx
                     (lambda (i m markup)
                       (let ((url (irregex-match-substring m)))
-                        (cons (list (substring/shared str i (irregex-match-start m))
+                        (cons (list (substring/shared
+                                     str
+                                     i
+                                     (irregex-match-start-index m 0))
                                     `(a (^ (href ,url)) ,url))
                               markup)))
                     '()
                     str
-                    (lambda (i markup)
+                    (lambda (i matches markup)
                       (cons (list (substring/shared str i (string-length str)))
                             markup))))))
 
