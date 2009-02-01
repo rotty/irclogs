@@ -1,6 +1,6 @@
 ;;; utils.sls --- Utilities for the irclogs system.
 
-;; Copyright (C) 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -40,11 +40,17 @@
    scheduler-has-work?
 
    ssubst fprintf println
-
+   url-escape
+   
    host-impl-info-shtml
    )
-  (import (rnrs)
+  (import (except (rnrs)
+                  string-copy string->list
+                  string-titlecase string-downcase string-upcase
+                  string-hash string-for-each)
           (srfi :8 receive)
+          (srfi :13 strings)
+          (srfi :14 char-sets)
           (spells opt-args)
           (spells alist)
           (spells queue)
@@ -210,5 +216,33 @@
       (if url
           `(a (^ (href ,url)) ,impl-name)
           impl-name)))
+
+  (define url-escape
+    (let ((safe-cs (char-set-union char-set:letter
+                                   char-set:digit
+                                   (string->char-set "$-_.+!*'(),/"))))
+      (define (encode code)
+        (string-append "%" (number->string code 16)))
+      (lambda (s safe-add)
+        (let ((safe-cs (char-set-union safe-cs (string->char-set safe-add))))
+          (str-escape
+           (lambda (c)
+             (if (char-set-contains? safe-cs c)
+                 (string c)
+                 (let ((code (char->integer c)))
+                   (cond ((< code 256)
+                          (encode code))
+                         (else
+                          (let ((utf8 (bytevector->u8-list (string->utf8 (string c)))))
+                            (string-concatenate (map encode utf8))))))))
+           s)))))
+
+  (define (str-escape escaper str)
+    (string-concatenate-reverse
+     (string-fold (lambda (c parts)
+                    (cons (escaper c) parts))
+                  '()
+                  str)))
+
 
   )

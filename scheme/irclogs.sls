@@ -32,7 +32,6 @@
                   vector-map)
           (srfi :2 and-let*)
           (srfi :43 vectors)
-          (srfi :14 char-sets)
           (xitomatl irregex)
           (spells opt-args)
           (srfi :1 lists)
@@ -470,34 +469,8 @@
                                       (unparse-date date))
                               "/"))
 
-  (define url-escape
-    (let ((safe-cs (char-set-union char-set:letter
-                                   char-set:digit
-                                   (string->char-set "$-_.+!*'(),/"))))
-      (define (encode code)
-        (string-append "%" (number->string code 16)))
-      (lambda (s safe-add)
-        (let ((safe-cs (char-set-union safe-cs (string->char-set safe-add))))
-          (str-escape (lambda (c)
-                        (if (char-set-contains? safe-cs c)
-                            (string c)
-                            (let ((code (char->integer c)))
-                              (cond ((< code 256)
-                                     (encode code))
-                                    (else
-                                     (let ((utf8 (bytevector->u8-list (string->utf8 (string c)))))
-                                       (string-concatenate (map encode utf8))))))))
-                      s)))))
-
   (define (num->str n width)
     (fmt #f (pad-char #\0 (pad/left 2 (num n)))))
-
-  (define (str-escape escaper str)
-    (string-concatenate-reverse
-     (string-fold (lambda (c parts)
-                    (cons (escaper c) parts))
-                  '()
-                  str)))
 
   (define (state-sort keys state)
     (list-sort (lambda (x y)
