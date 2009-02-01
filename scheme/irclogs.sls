@@ -26,7 +26,8 @@
   (export make-irclogs)
   (import (except (rnrs)
                   file-exists? delete-file
-                  string-copy string->list string-titlecase string-downcase string-upcase
+                  string-copy string->list
+                  string-titlecase string-downcase string-upcase
                   string-hash string-for-each
                   list->vector vector->list vector-fill! vector-for-each
                   vector-map)
@@ -830,18 +831,22 @@
              (call/cc
               (lambda (finish)
                 (let ((timer (start-timer)))
+                  (define (escaper date day-count msg-count)
+                    (when (>= (timer) (self 'search-timeout))
+                      (finish
+                       (self %render-search-footer
+                             tag channel
+                             day-count msg-count (timer)
+                             (redate-search search date)))))
                   (receive (day-count msg-count)
-                           (self %day-range-search-task port tag channel search
-                                 (lambda (date day-count msg-count)
-                                   (when (>= (timer) (self 'search-timeout))
-                                     (finish (self %render-search-footer
-                                                   day-count msg-count (timer) #t)))))
-                    (self %render-search-footer day-count msg-count (timer) #f))))))))
+                           (self %day-range-search-task port tag channel search escaper)
+                    (self %render-search-footer
+                          tag channel day-count msg-count (timer) #f))))))))
         (task-result)
         ,(footer self))))
 
   (define-method (*irclogs* %render-search-footer self resend
-                            day-count msg-count seconds cont-search)
+                            tag channel day-count msg-count seconds cont-search)
     `(div (^ (id "timing"))
           ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
                    msg-count
@@ -849,7 +854,12 @@
                    (fmt #f (num (inexact seconds) 10 4)))
           (br)
           ,@(if cont-search
-                '("Continue interrupted search")
+                `((a (^ (href
+                         ,(ssubst "{0}{1}/?q={2}"
+                                  (self 'base-url)
+                                  (url-escape (string-append tag "/" channel) "/")
+                                  (search->query cont-search))))
+                     "Continue search"))
                 '())))
 
   (define-method (*irclogs* %day-range-search-task self resend

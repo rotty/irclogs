@@ -1,6 +1,6 @@
 ;;; query.sls --- Query string handling.
 
-;; Copyright (C) 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -26,11 +26,13 @@
 
 (library (irclogs query)
   (export query->search
+          search->query
 
           search-base-date
           search-n-days
           search-match-expr
           search-matcher
+          redate-search
 
           match-expr-id
           match-expr-tag
@@ -40,10 +42,11 @@
           match-expr->shtml)
   (import (rnrs)
           (srfi :2 and-let*)
-          (xitomatl irregex)
           (srfi :8 receive)
-          (only (srfi :1 lists) any unfold filter-map)
+          (only (srfi :1 lists) any unfold filter-map concatenate)
           (only (srfi :13 strings) string-contains string-join)
+          (srfi :19 time)
+          (xitomatl irregex)
           (spells alist)
           (spells misc)
           (spells tracing)
@@ -56,6 +59,18 @@
 
   (define (search-matcher search)
     (match-expr-matcher (search-match-expr search)))
+
+  ;; Return a search with @2 as new base date, and the number of days
+  ;; reduced, as to reach back to the same date as @1.
+  (trace-define (redate-search search base-date)
+    (make-search base-date
+                 (- (search-n-days search)
+                    (exact
+                     (truncate
+                      (- (date->julian-day
+                          (search-base-date search))
+                         (date->julian-day base-date)))))
+                 (search-match-expr search)))
 
   (define-record-type match-expr
     (fields id tag children matcher))
@@ -89,12 +104,38 @@
            n-days)
        (query-parts->match-expr parts))))
 
+  (define (search->query search)
+    (url-escape
+     (call-with-string-output-port
+       (lambda (port)
+         (write (list 'date (date->string (search-base-date search) "~1")) port)
+         (display " " port)
+         (write (list 'days (search-n-days search)) port)
+         (display " " port)
+         (write
+          (match-expr->sexp (search-match-expr search))
+          port)))
+     ""))
+
+  (define (match-expr->sexp me)
+    (cond ((and (match-expr? me)
+                (match-expr-tag me))
+           => (lambda (tag)
+                (cons tag (map match-expr->sexp (match-expr-children me)))))
+          ((match-expr? me)
+           (car (match-expr-children me)))
+          (else
+           me)))
+
   (define (match-exprs/ids first-id lst)
     (let loop ((match-exprs '()) (i first-id) (lst lst))
       (define (handle-leaf match-expr)
         (if match-expr
             (loop (cons match-expr match-exprs) (+ i 1) (cdr lst))
             (loop match-exprs i (cdr lst))))
+      (define (handle-compound maker children)
+        (receive (next-id sub-exprs) (match-exprs/ids i children)
+          (loop (cons (maker sub-exprs) match-exprs) next-id (cdr lst))))
       (if (null? lst)
           (values i (reverse match-exprs))
           (cond ((and (pair? (car lst))
@@ -103,6 +144,7 @@
                  (case (caar lst)
                    ((rx)   (handle-leaf (msg-rx-match-expr i (cadar lst))))
                    ((nick) (handle-leaf (nick-str-match-expr i (cadar lst))))
+                   ((and)  (handle-compound and-match-expr (cdar lst)))
                    (else   (loop match-exprs i (cdr lst)))))
                 ((->str (car lst))
                  => (lambda (s)
@@ -111,16 +153,25 @@
                  (loop match-exprs i (cdr lst)))))))
 
   (define (query-parts->match-expr parts)
-    (receive (next-id children) (match-exprs/ids 0 parts)
-      (make-match-expr
-       #f
-       'and
-       children
-       (let ((submatchers (map match-expr-matcher children)))
-         (lambda (entry)
-           (and-map (lambda (match)
-                      (match entry))
-                    submatchers))))))
+    (let*-values (((next-id subs) (match-exprs/ids 0 parts))
+                  ((and-subs other-subs)
+                   (partition (lambda (sub)
+                                (eq? (match-expr-tag sub) 'and))
+                              subs)))
+      (and-match-expr (append (concatenate
+                               (map match-expr-children and-subs))
+                              other-subs))))
+
+  (define (and-match-expr children)
+    (make-match-expr
+     #f
+     'and
+     children
+     (let ((submatchers (map match-expr-matcher children)))
+       (lambda (entry)
+         (and-map (lambda (match)
+                    (match entry))
+                  submatchers)))))
 
   (define (msg-str-match-expr id s)
     (and (string? s)
@@ -158,7 +209,7 @@
 
 
 ;;; UI/HTML-related functionality follows
-  
+
   (define (match-expr->shtml m)
     (define (children-shtml)
       (map match-expr->shtml (match-expr-children m)))
