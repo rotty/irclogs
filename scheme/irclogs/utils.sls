@@ -116,8 +116,11 @@
     (date->string date isodate-fmt))
 
   (define (parse-date s)
-    (guard (c (#t #f))
-      (date-with-zone-offset (string->date s isodate-fmt) 0)))
+    (cond ((string=? s "today")
+           (current-date 0))
+          (else
+           (guard (c (#t #f))
+             (date-with-zone-offset (string->date s isodate-fmt) 0)))))
 
   (define (fold-days-between start-day end-day proc . seeds)
     (let* ((start (date->time-utc start-day))
