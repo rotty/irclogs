@@ -1,9 +1,9 @@
-* The IRClogs Scheme system
+#+TITLE: The IRClogs Scheme system
 
 IRClogs is a software package written in [[http://en.wikipedia.org/wiki/Scheme_(programming_language)][Scheme]], presenting a web
-interface to a collection of IRC logs. 
+interface to a collection of IRC logs.
 
-** Features
+* Features
 
 - Serve logs from multiple channels, organized by "tags", which
   normally correspond to IRC networks
@@ -17,14 +17,14 @@ interface to a collection of IRC logs.
 
 - Search a channel for messages
 
-** Planned features
+* Planned features
 
 - Toggling of channel events (joins, quits, etc.) via JavaScript or a
   query option (JavaScript part already implemented)
 
 - Support for If-Modified-Since also for the daily log pages
 
-- Deal with local time being different from GMT, and possibly 
+- Deal with local time being different from GMT, and possibly
   present times to the user in his timezone
 
 - Add a ~/today/~ alias for the current date
@@ -47,86 +47,17 @@ interface to a collection of IRC logs.
   restrict access to via HTTP authentication, IP address or some other
   mechanism.
 
-** Instances
+* Instances
 
 Currently, there's an experimental instance of IRClogs running at
 [[http://rottyforge.yi.org/irclogs/]], serving a few select channels on
 the GNOME and freenode networks.
 
-** Documentation
+* Documentation
 
-*** Searching
+See [[file:searching.org][here]] for a bit of information on how to search in IRClogs.
 
-A search always has a "base date", and a number of days it reaches
-backwards; both have default values:
-
-- The "base date" defaults to the current date, if no ~date~ query
-  option is given in the URL, which is the case when you initially
-  enter a channel activity overview page. If you use the navigation
-  links or the "pin" links presented for each day to navigate to
-  another day, that changes the base date to the corresponding day.
-
-- The number of days searched by default is 14, this option can be
-  changed in the configuration file.
-
-The phrase (interpreted as character string) entered into the search
-field is parsed into a list of "search parameters" according to the
-following rules:
-
-- As long as possible, an item is consumed from the string by using
-  the Scheme procedure for reading a datum ([[http://www.schemers.org/Documents/Standards/R5RS/HTML/r5rs-Z-H-9.html#%_idx_612][R5RS read]], [[http://www.r6rs.org/final/html/r6rs-lib/r6rs-lib-Z-H-9.html#node_idx_708][R6RS
-  get-datum]]). If parsing fails at some point, the entire remainder of
-  the string is consumed a single item. This step results in a list of
-  Scheme datums. For example:
-
-  - ~foo bar "hello world" 42~ results in the list ~(foo bar "hello
-    world" 42)~.
-
-  - ~(date "2008-10-26") (days 42) foo) 123~ results in the list
-    ~((date "2008-10-26") (days 42) foo ") 123")~; note that the
-    charcters starting from the mismatched closing paren are
-    accumulated into a single string, as the Scheme parser will fail a
-    that point.
-
-- The list resulting from the previous step is broken into two parts:
-  "search parameters" and "search expressions". A search parameter is
-  always a list, with the first item indicating the parameter
-  name. The following search paramaters are available:
-  
-  - date :: Specifies the date that the search will start at. This
-    parameter must be written as ~(date "YYYY-mm-dd")~, i.e. the date
-    must be written as a string in the ISO date notation. As noted
-    above, the date defaults to the first day displayed on the channel
-    overview page.
-
-  - days :: Specifies the number of days the search should cover. Note
-    that the number of days is specifying how far to search *back*, so
-    given a base date of 2008-12-05, and 3 days to search, the search
-    starts at 2008-12-05, 24:00 hours and covers the time back to
-    2008-12-03, 0:00 hours.
-
-   A list of search expressions and how they are used for matching
-   follows:
-
-  - strings :: A string indicates a substring match, i.e. there is a
-    match if the message contains the string given at any position.
-
-  - symbols :: For convinience, symbols are converted to strings, and
-    the resulting string is used as above, as a substring match.
-
-  - ~(rx <expr>)~ :: A regular expresssion match; ~<expr>~ must be
-    either an extended POSIX regular expression string or a symbolic
-    regular expression (SRE). For the exact syntax that can be used,
-    see the [[irregex][irregex manual FIXME: link]].
-
-  All search expressions specified must match for a specific log entry
-  for it to be considered a search hit; in other words: The search
-  expressions are combined using /logical and/.
-
-  There is currently no way to specify a /logical or/ relationship, or
-  nesting of search expressions, but this is a planned feature.
-
-** Support
+* Support
 
 Currently, there's no documentation on how to set up an IRClogs
 instance, so if you have questions about that or anything else, want
