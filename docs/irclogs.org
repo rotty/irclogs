@@ -22,10 +22,15 @@ interface to a collection of IRC logs.
 - Toggling of channel events (joins, quits, etc.) via JavaScript or a
   query option (JavaScript part already implemented)
 
+- Support for If-Modified-Since also for the daily log pages
+
+- Deal with local time being different from GMT, and possibly 
+  present times to the user in his timezone
+
+- Add a ~/today/~ alias for the current date
+
 - Improve search:
 
-  - Interrupt search after consuming a configured amount of time, with
-    option to resume
   - Links directly to log at the times of the hits
   - Specify amount of context around a message to show
   - Allow explicitly specifying base date
@@ -115,7 +120,7 @@ following rules:
     see the [[irregex][irregex manual FIXME: link]].
 
   All search expressions specified must match for a specific log entry
-  fot it to be considered a search hit; in other words: The search
+  for it to be considered a search hit; in other words: The search
   expressions are combined using /logical and/.
 
   There is currently no way to specify a /logical or/ relationship, or
@@ -129,4 +134,4 @@ to help out, or think you have found a bug, or want to provide any
 other kind of feedback, after having a look at the [[http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=headblob;f=/README][README]], and taking
 a look at the [[http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=summary][Source]] (if you're brave ;-)) I usually hang out on
 [[http://rottyforge.yi.org/irclogs/freenode/%23scheme/][irc://freenode/#scheme]] as ~rotty~ -- just send me a ping, but don't
-hold your breadth.
+hold your breath.
