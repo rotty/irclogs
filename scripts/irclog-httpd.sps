@@ -1,6 +1,6 @@
 ;;; irclog-httpd.sps -- HTTP Server providing an interface to IRC logs
 
-;; Copyright (C) 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -31,7 +31,7 @@
         (spells table)
         (only (srfi :13 strings) string-join string-concatenate)
         (only (srfi :1 lists) unfold drop filter-map iota)
-        (spells string-substitute)
+        (spells string-utils)
         (spells pathname)
         (spells filesys)
         (spells time-lib)

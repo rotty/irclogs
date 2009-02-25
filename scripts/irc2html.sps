@@ -1,7 +1,7 @@
 #!/usr/bin/mzscheme -qr
 
 ;;  irc2html.scm - Convert IRC chat logs into valid HTML with valid CSS
-;;  Copyright 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;;  Copyright 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 ;;  Copyright 2003 MJ Ray <mjr@dsl.pipex.com>
 ;;  Please see the README file for this program for more information.
 ;;
@@ -30,7 +30,7 @@
               string-concatenate-reverse
               string-fold)
         (spells alist)
-        (spells string-substitute)
+        (spells string-utils)
         (spells format)
         (spells time-lib)
         (spells filesys)

@@ -43,7 +43,7 @@
           (spells time-lib)
           (spells pathname)
           (spells filesys)
-          (spells string-substitute)
+          (spells string-utils)
           (spells tracing)
           (fmt)
           (prometheus)

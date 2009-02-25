@@ -57,7 +57,7 @@
           (spells time-lib)
           (spells parameter)
           (spells misc)
-          (spells string-substitute)
+          (spells string-utils)
           (spells tracing))
 
   (define (make-timer)
