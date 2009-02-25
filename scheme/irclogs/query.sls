@@ -62,7 +62,7 @@
 
   ;; Return a search with @2 as new base date, and the number of days
   ;; reduced, as to reach back to the same date as @1.
-  (trace-define (redate-search search base-date)
+  (define (redate-search search base-date)
     (make-search base-date
                  (- (search-n-days search)
                     (exact
