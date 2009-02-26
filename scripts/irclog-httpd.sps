@@ -57,7 +57,7 @@
                timeout-add-seconds idle-add io-add-watch io-channel-unix-new
                markup-escape-text)
          g-)
- (prefix (only ("Soup" #f) <server> status-get-phrase)
+ (prefix (only ("Soup" #f) <server> <address> status-get-phrase)
          soup-))
 
 (define (main argv)
@@ -71,6 +71,7 @@
 
 (define (default-config)
   '((port 8001)
+    (interface "127.0.0.1")
     (static-files "./static")
     (irclogs
      (base-url "/")
@@ -125,72 +126,84 @@
                              (bail-out "unexpected condition on signal fd: {0}"
                                        condition)))))))
 
+(define (config-ref config name)
+  (car (assq-ref config name)))
+
+(define (instantiate-server config)
+  (let ((address (send <soup-address>
+                   (new (config-ref config 'interface)
+                        (config-ref config 'port)))))
+    (send address (resolve-sync #f))
+    (let ((server
+           (send <soup-server> (new/props 'interface address
+                                          'server-header "irclog-httpd"))))
+      (unless server
+        (bail-out "Unable to bind to server port {0}\n"
+                  (config-ref config 'port)))
+      server)))
+
 (define (irclog-httpd config)
   (g-thread-init #f)
   (install-signal-handler '(int) (lambda (sig)
                                    (println "Received signal {0}, exiting" sig)
                                    (exit 1)))
-  (let ((port (car (assq-ref config 'port))))
-    (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
-      (let ((server (send <soup-server> (new/props 'port port
-                                                   'server-header "irclog-httpd")))
-            (irclogs (make-irclogs (assq-ref config 'irclogs)))
-            (n-active-tasks 0)
-            (task-table (make-table 'eqv))
-            (scheduler (make-scheduler)))
-        (define (task-title task-id)
-          (table-ref task-table task-id))
-        (define (scheduler-idle-callback user-data)
-          (scheduler-work scheduler
-                          (lambda (result)
-                            (receive (task-id msg val) (task-result-values result)
-                              (val)
-                              (send server (unpause-message msg))
-                              (set! n-active-tasks (- n-active-tasks 1))
-                              (println "task {0} finished; {1} still active"
-                                       task-id n-active-tasks)))
-                          (lambda (result)
-                            (receive (task-id msg val) (task-result-values result)
-                              (println "<task {0} '{1}'> yielded value {2}"
-                                       task-id (task-title task-id) val)
-                              (when (and (not (eq? 'cancelled val))
-                                         (eq? 'chunked (send (send msg (get-response-headers))
-                                                         (get-encoding))))
-                                (send server (unpause-message msg)))
-                              (not (eq? 'cancelled val))))))
-        (define (defer-task title msg proc)
-          (let ((task-id (new-task-id)))
-            (let ((had-work? (scheduler-has-work? scheduler)))
-              (scheduler-enqueue! scheduler (lambda (yield)
-                                              (make-task-result
-                                               task-id
-                                               msg
-                                               (proc (lambda (v)
-                                                       (yield (make-task-result task-id msg v)))))))
-              (set! n-active-tasks (+ n-active-tasks 1))
-              (println "task {0} enqueued; {1} now active" task-id n-active-tasks)
-              (table-set! task-table task-id title)
-              (when (not had-work?)
-                (g-idle-add scheduler-idle-callback)))
-            task-id))
-        (unless server
-          (bail-out "Unable to bind to server port {0}\n" port))
-        (irclogs 'update-state)
-        (g-timeout-add-seconds
-         60
-         (lambda (user-data)
-           (irclogs 'update-state)
-           #t))
-        (g-idle-add scheduler-idle-callback)
-        (send server
-          (add-handler #f (wrap-handler (irclogs-handler defer-task irclogs)))
-          (add-handler "/static/" (wrap-handler
-                                   (static-file-handler
-                                    (pathname-as-directory (car (assq-ref config 'static-files)))
-                                    1)))
-          (run-async))
-        (println "Waiting for requests...")
-        (g-main-loop-run (g-main-loop-new #f #t))))))
+  (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
+    (let ((server (instantiate-server config))
+          (irclogs (make-irclogs (assq-ref config 'irclogs)))
+          (n-active-tasks 0)
+          (task-table (make-table 'eqv))
+          (scheduler (make-scheduler)))
+      (define (task-title task-id)
+        (table-ref task-table task-id))
+      (define (scheduler-idle-callback user-data)
+        (scheduler-work scheduler
+                        (lambda (result)
+                          (receive (task-id msg val) (task-result-values result)
+                            (val)
+                            (send server (unpause-message msg))
+                            (set! n-active-tasks (- n-active-tasks 1))
+                            (println "task {0} finished; {1} still active"
+                                     task-id n-active-tasks)))
+                        (lambda (result)
+                          (receive (task-id msg val) (task-result-values result)
+                            (println "<task {0} '{1}'> yielded value {2}"
+                                     task-id (task-title task-id) val)
+                            (when (and (not (eq? 'cancelled val))
+                                       (eq? 'chunked (send (send msg (get-response-headers))
+                                                       (get-encoding))))
+                              (send server (unpause-message msg)))
+                            (not (eq? 'cancelled val))))))
+      (define (defer-task title msg proc)
+        (let ((task-id (new-task-id)))
+          (let ((had-work? (scheduler-has-work? scheduler)))
+            (scheduler-enqueue! scheduler (lambda (yield)
+                                            (make-task-result
+                                             task-id
+                                             msg
+                                             (proc (lambda (v)
+                                                     (yield (make-task-result task-id msg v)))))))
+            (set! n-active-tasks (+ n-active-tasks 1))
+            (println "task {0} enqueued; {1} now active" task-id n-active-tasks)
+            (table-set! task-table task-id title)
+            (when (not had-work?)
+              (g-idle-add scheduler-idle-callback)))
+          task-id))
+      (irclogs 'update-state)
+      (g-timeout-add-seconds
+       60
+       (lambda (user-data)
+         (irclogs 'update-state)
+         #t))
+      (g-idle-add scheduler-idle-callback)
+      (send server
+        (add-handler #f (wrap-handler (irclogs-handler defer-task irclogs)))
+        (add-handler "/static/" (wrap-handler
+                                 (static-file-handler
+                                  (pathname-as-directory (car (assq-ref config 'static-files)))
+                                  1)))
+        (run-async))
+      (println "Waiting for requests...")
+      (g-main-loop-run (g-main-loop-new #f #t)))))
 
 (define (wrap-handler handler)
   ;; Note that `user-data' will go away when I get around to implement hiding it
@@ -412,7 +425,7 @@
     (lambda args
       (apply irclogs msg-name args)))
   (lambda (server msg path query)
-    (let* ((just-meta? (eq? (send msg (get-method)) 'head))
+    (let* ((just-meta? (string=? (send msg (get-method)) "HEAD"))
            (pathname (x->pathname path))
            (comps (pathname-directory pathname))
            (n-comps (length comps))
