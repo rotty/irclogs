@@ -1,6 +1,6 @@
 ;;; libdaemon.sls --- Bindings for libdaemon.
 
-;; Copyright (C) 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -39,13 +39,6 @@
     (or (dlopen name)
         (error 'checked-dlopen "unable to open shared library" name (dlerror))))
 
-  (define-syntax define-callouts
-    (syntax-rules ()
-      ((define-callouts shlib (name ret-type c-name arg-types) ...)
-       (begin
-         (define name ((make-c-callout ret-type arg-types) (dlsym shlib c-name)))
-         ...))))
-
   (define known-signals
     '((alrm . 14)
       (hup  .  1)
@@ -79,7 +72,7 @@
 
   (define libdaemon (checked-dlopen "libdaemon.so.0"))
 
-  (define-callouts libdaemon
+  (define-c-callouts libdaemon
     (signal-install% 'int "daemon_signal_install" '(int))
     (signal-fd%      'int "daemon_signal_fd" '())
     (signal-next%    'int "daemon_signal_next" '()))
