@@ -29,7 +29,8 @@
         (spells parameter)
         (spells alist)
         (spells table)
-        (only (srfi :13 strings) string-join string-concatenate)
+        (only (srfi :13 strings)
+              string-join string-concatenate string-prefix?)
         (only (srfi :1 lists) unfold drop filter-map iota)
         (spells string-utils)
         (spells pathname)
@@ -72,11 +73,25 @@
 (define (default-config)
   '((port 8001)
     (interface "127.0.0.1")
+    ;; Where static files are to be found (location on the local
+    ;; filesystem)
     (static-files "./static")
+
+    ;; This path is is stripped from requests and only requests
+    ;; matching that path are considered
+    (path-prefix "")
+
     (irclogs
+
+     ;; This URL is used to refer to the served content
      (base-url "/")
+
+     ;; Where to look for log files
      (log-dir ".")
-     (state-dir "./.irclogs-state"))))
+
+     ;; Where to put in state (must be a writable directory)
+     (state-dir "./.irclogs-state")))
+  )
 
 (define (merge-config config new-values)
   (let loop ((result config) (vals new-values))
@@ -150,6 +165,7 @@
   (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
     (let ((server (instantiate-server config))
           (irclogs (make-irclogs (assq-ref config 'irclogs)))
+          (path-prefix (config-ref config 'path-prefix))
           (n-active-tasks 0)
           (task-table (make-table 'eqv))
           (scheduler (make-scheduler)))
@@ -196,24 +212,34 @@
          #t))
       (g-idle-add scheduler-idle-callback)
       (send server
-        (add-handler #f (wrap-handler (irclogs-handler defer-task irclogs)))
-        (add-handler "/static/" (wrap-handler
-                                 (static-file-handler
-                                  (pathname-as-directory (car (assq-ref config 'static-files)))
-                                  1)))
-        (run-async))
+        (add-handler path-prefix
+                     (wrap-handler (irclogs-handler defer-task irclogs)
+                                   path-prefix)))
+      (let ((static-prefix (string-append path-prefix "/static")))
+        (send server
+          (add-handler static-prefix
+                       (wrap-handler
+                        (static-file-handler
+                         (pathname-as-directory (config-ref config 'static-files))
+                         1)
+                        path-prefix))))
+      (send server (run-async))
       (println "Waiting for requests...")
       (g-main-loop-run (g-main-loop-new #f #t)))))
 
-(define (wrap-handler handler)
+(define (wrap-handler handler path-prefix)
   ;; Note that `user-data' will go away when I get around to implement hiding it
   (lambda (server msg path query client user-data)
     (let ((method (send msg (get 'method)))
           (req-headers (send msg (get-request-headers)))
           (query-alist (map (lambda (e)
                               (cons (string->symbol (car e)) (cdr e)))
-                            (ghash->alist query))))
-      (println "{0} {1} {2} HTTP/1.{3}" method path query-alist (send msg (get 'http-version)))
+                            (ghash->alist query)))
+          (stripped-path
+           (if (string-prefix? path-prefix path)
+               (substring path (string-length path-prefix) (string-length path)))))
+      (println "{0} {1} (=> {2}) {3} HTTP/1.{4}"
+               method path stripped-path query-alist (send msg (get 'http-version)))
       (send req-headers
         (foreach (lambda (name value user-data)
                    (println "{0}: {1}" name value))))
@@ -221,9 +247,11 @@
         (when (> (send body (get-length)) 0)
           (println (send body (get-data)))))
       (receive (code last-modified generate-response)
-               (handler server msg path query-alist)
+               (handler server msg stripped-path query-alist)
         (define (log-response)
-          (println " -> {0} {1}" (send msg (get-status-code)) (send msg (get 'reason-phrase))))
+          (println " -> {0} {1}"
+                   (send msg (get-status-code))
+                   (send msg (get 'reason-phrase))))
         (define (add-headers)
           (when last-modified
             (add-response-headers!
