@@ -131,7 +131,7 @@
   (let ((io (g-io-channel-unix-new (daemon-signal-fd))))
     (g-io-add-watch io
                     '(in err hup)
-                    (lambda (source condition user-data)
+                    (lambda (source condition)
                       (cond ((equal? '(in) condition)
                              (do ((sig (daemon-signal-next) (daemon-signal-next)))
                                  ((= sig 0))
@@ -171,7 +171,7 @@
           (scheduler (make-scheduler)))
       (define (task-title task-id)
         (table-ref task-table task-id))
-      (define (scheduler-idle-callback user-data)
+      (define (scheduler-idle-callback)
         (scheduler-work scheduler
                         (lambda (result)
                           (receive (task-id msg val) (task-result-values result)
@@ -207,7 +207,7 @@
       (irclogs 'update-state)
       (g-timeout-add-seconds
        60
-       (lambda (user-data)
+       (lambda ()
          (irclogs 'update-state)
          #t))
       (g-idle-add scheduler-idle-callback)
@@ -228,8 +228,7 @@
       (g-main-loop-run (g-main-loop-new #f #t)))))
 
 (define (wrap-handler handler path-prefix)
-  ;; Note that `user-data' will go away when I get around to implement hiding it
-  (lambda (server msg path query client user-data)
+  (lambda (server msg path query client)
     (let ((method (send msg (get 'method)))
           (req-headers (send msg (get-request-headers)))
           (query-alist (map (lambda (e)
@@ -241,7 +240,7 @@
       (println "{0} {1} (=> {2}) {3} HTTP/1.{4}"
                method path stripped-path query-alist (send msg (get 'http-version)))
       (send req-headers
-        (foreach (lambda (name value user-data)
+        (foreach (lambda (name value)
                    (println "{0}: {1}" name value))))
       (let ((body (send msg (get-request-body))))
         (when (> (send body (get-length)) 0)
