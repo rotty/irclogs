@@ -545,7 +545,7 @@
                          (let ((content (get-bytevector-all port)))
                            (if (eof-object? content)
                                (add-headers!)
-                               (send msg (set-response content-type 'copy content)))))))))
+                               (send msg (set-response content-type content)))))))))
                  ((head)
                   (values
                    'ok
