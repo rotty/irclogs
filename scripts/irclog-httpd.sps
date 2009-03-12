@@ -42,11 +42,11 @@
         (fmt)
         (sxml simple)
         (sxml transform)
+        (sbank glib-daemon)
         (sbank gobject)
         (sbank soup)
         (sbank typelib)
         (sbank ctypes basic)
-        (irclogs libdaemon)
         (irclogs utils)
         (irclogs))
 
@@ -126,21 +126,6 @@
       (set! counter (+ counter 1))
       counter)))
 
-(define (install-signal-handler sigs proc)
-  (apply daemon-signal-init sigs)
-  (let ((io (g-io-channel-unix-new (daemon-signal-fd))))
-    (g-io-add-watch io
-                    '(in err hup)
-                    (lambda (source condition)
-                      (cond ((equal? '(in) condition)
-                             (do ((sig (daemon-signal-next) (daemon-signal-next)))
-                                 ((= sig 0))
-                               (proc sig))
-                             #t)
-                            (else
-                             (bail-out "unexpected condition on signal fd: {0}"
-                                       condition)))))))
-
 (define (config-ref config name)
   (car (assq-ref config name)))
 
@@ -159,9 +144,9 @@
 
 (define (irclog-httpd config)
   (g-thread-init #f)
-  (install-signal-handler '(int) (lambda (sig)
-                                   (println "Received signal {0}, exiting" sig)
-                                   (exit 1)))
+  (g-install-signal-handler '(int) (lambda (sig)
+                                     (println "Received signal {0}, exiting" sig)
+                                     (exit 1)))
   (parameterize ((null-ok-always-on? #t)) ;; Needed for field access, will go away
     (let ((server (instantiate-server config))
           (irclogs (make-irclogs (assq-ref config 'irclogs)))
