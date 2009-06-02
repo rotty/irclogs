@@ -26,7 +26,7 @@
         (rnrs r5rs)
         (srfi :2 and-let*)
         (srfi :8 receive)
-        (spells parameter)
+        (srfi :39 parameters)
         (spells alist)
         (spells table)
         (only (srfi :13 strings)
@@ -42,6 +42,7 @@
         (fmt)
         (sxml simple)
         (sxml transform)
+        (sbank glib)
         (sbank glib-daemon)
         (sbank gobject)
         (sbank soup)
@@ -49,17 +50,6 @@
         (sbank ctypes basic)
         (irclogs utils)
         (irclogs))
-
-(soup-setup!)
-(typelib-import
- (prefix (only ("GLib" #f)
-               thread-init
-               main-loop-new main-loop-run
-               timeout-add-seconds idle-add io-add-watch io-channel-unix-new
-               markup-escape-text)
-         g-)
- (prefix (only ("Soup" #f) <server> <address> status-get-phrase)
-         soup-))
 
 (define (main argv)
   (let ((config
@@ -135,7 +125,7 @@
                         (config-ref config 'port)))))
     (send address (resolve-sync #f))
     (let ((server
-           (send <soup-server> (new/props 'interface address
+           (send <soup-server> (new* 'interface address
                                           'server-header "irclog-httpd"))))
       (unless server
         (bail-out "Unable to bind to server port {0}\n"
@@ -143,7 +133,6 @@
       server)))
 
 (define (irclog-httpd config)
-  (g-thread-init #f)
   (g-install-signal-handler '(int) (lambda (sig)
                                      (println "Received signal {0}, exiting" sig)
                                      (exit 1)))

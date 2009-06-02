@@ -24,20 +24,20 @@
 
 (library (irclogs)
   (export make-irclogs)
-  (import (except (rnrs)
-                  file-exists? delete-file
-                  string-copy string->list
-                  string-titlecase string-downcase string-upcase
-                  string-hash string-for-each
+  (import (except (rnrs) file-exists? delete-file
                   list->vector vector->list vector-fill! vector-for-each
                   vector-map)
+          (only (srfi :1 lists)
+                append-map concatenate count drop fold iota
+                last make-list split-at)
           (srfi :2 and-let*)
-          (srfi :43 vectors)
-          (xitomatl irregex)
-          (spells opt-args)
-          (srfi :1 lists)
-          (srfi :13 strings)
           (srfi :8 receive)
+          (only (srfi :13 strings)
+                string-concatenate
+                substring/shared)
+          (srfi :26 cut)
+          (srfi :43 vectors)
+          (spells opt-args)
           (spells alist)
           (spells misc)
           (spells time-lib)
@@ -45,6 +45,7 @@
           (spells filesys)
           (spells string-utils)
           (spells tracing)
+          (xitomatl irregex)
           (fmt)
           (prometheus)
           (sxml simple)
@@ -68,28 +69,6 @@
          ,(count (lambda (entry)
                    (member (irc-log-entry-type entry) '("<" "*")))
                  entries)))))
-
-  (define (call-with-output-file/atomic pathname proc)
-    (receive (tmp-filename tmp-port) (create-temp-file pathname)
-      (call-with-port tmp-port proc)
-      (rename-file tmp-filename pathname)))
-
-  (define create-temp-file
-    (let ((count 1))
-      (lambda (path)
-        (let ((prefix (file-namestring path)))
-          (let loop ((i count))
-            (let ((pathname (pathname-with-file
-                             path
-                             (string-append prefix (number->string i) ".tmp"))))
-              (guard (c ((i/o-file-already-exists-error? c)
-                         (loop (+ i 1))))
-                (let ((port (open-file-output-port (x->namestring pathname)
-                                                   (file-options)
-                                                   'block
-                                                   (native-transcoder))))
-                  (set! count (+ i 1))
-                  (values pathname port)))))))))
 
   (define (submatches match names)
     (map (lambda (name)
@@ -177,9 +156,7 @@
 
   (define (pathname-has-type? pathname type)
     (let ((file (pathname-file pathname)))
-      (and file
-           (not (null? (file-types file)))
-           (string=? type (last (file-types file))))))
+      (and=> (and file (file-type file)) (cut string=? type <>))))
 
   (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
 
@@ -257,7 +234,7 @@
                               markup)))
                     '()
                     str
-                    (lambda (i matches markup)
+                    (lambda (i markup)
                       (cons (list (substring/shared str i (string-length str)))
                             markup))))))
 
