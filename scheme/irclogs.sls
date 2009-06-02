@@ -290,6 +290,7 @@
     `(div (^ (id "foot"))
           (p "Powered by the " (a (^ (href ,(self 'homepage-url))) "IRClogs System")
              ", running on " ,(host-impl-info-shtml))
+          ,@(self 'footer-sxml)
           #|
           (p (a (^ (href "http://validator.w3.org/check?uri=referer"))
                 (img (^ (src "http://www.w3.org/Icons/valid-xhtml10-blue")
@@ -600,6 +601,7 @@
     %set-base-url! %set-homepage-url!
     %matcher %set-matcher!
     %set-search-n-days!
+    %set-footer-sxml!
     %render-multi-overview/html
     %render-channel-overview/html
     %render-search-task
@@ -622,6 +624,7 @@
                     ((homepage-url) (logs %set-homepage-url! (cadr entry)))
                     ((match)      (logs %set-matcher! (sexp->matcher (cadr entry))))
                     ((search-n-days) (logs %set-search-n-days! (cadr entry)))
+                    ((footer-sxml) (logs %set-footer-sxml! (cdr entry)))
                     (else
                      (error 'make-irclogs "unknown option" entry))))
                 options)
@@ -894,5 +897,6 @@
   (*irclogs* 'add-value-slot! %matcher %set-matcher! #f)
   (*irclogs* 'add-value-slot! 'search-n-days %set-search-n-days! 14)
   (*irclogs* 'add-value-slot! 'search-timeout 2)
+  (*irclogs* 'add-value-slot! 'footer-sxml %set-footer-sxml! '())
 
   )
