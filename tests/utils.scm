@@ -1,6 +1,6 @@
 ;;; utils.scm --- Unit tests for (irclogs utils)
 
-;; Copyright (C) 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -49,10 +49,14 @@
             (loop)))
       (reverse result))))
 
-(testeez "Scheduler"
-  (test/equal "task interleaving"
-    (scheduler-test-1)
-    '((task-1 0) (task-2 0) (task-3 0)
-      (task-1 1) (task-2 1) (task-3 done)
-      (task-1 2) (task-2 done)
-      (task-1 done))))
+(define-test-suite scheduler-tests
+  "Scheduler")
+
+(define-test-case scheduler-tests task-interleaving ()
+  (test-equal '((task-1 0) (task-2 0) (task-3 0)
+                (task-1 1) (task-2 1) (task-3 done)
+                (task-1 2) (task-2 done)
+                (task-1 done))
+              (scheduler-test-1)))
+
+(run-test-suite scheduler-tests)

@@ -22,23 +22,30 @@
 ;;; Code:
 
 (define (q-dt q)
-  (receive (date days match?) (parse-query q (mk-date 2008 12 5) 42)
-    (list (unparse-date date) days)))
+  (let ((s (query->search q (mk-date 2008 12 5) 42)))
+    (list (date->string (search-base-date s) "~1")
+          (search-n-days s))))
 
 (define (q-m q)
-  (receive (date days match?) (parse-query q (mk-date 2008 12 5) 42)
-    (lambda (s)
-      (match? (make-irc-log-entry 0 0 0 "" "dogbert" s)))))
+  (let ((s (query->search q (mk-date 2008 12 5) 42)))
+    (lambda (str)
+      ((search-matcher s)
+       (make-irc-log-entry 0 0 0 "" "dogbert" str)))))
 
 (define (bool x)
   (if x #t #f))
 
-(testeez "query defaults"
-  (test/equal "default propagation" (q-dt "") '("2008-12-05" 42))
-  (test/equal "default override (days)" (q-dt "(days 43)") '("2008-12-05" 43)))
+(define-test-suite query-tests
+  "Query handling")
 
-(let ((m1? (q-m ") foo bar")))
-  (testeez "match"
-    (test-true "m1 (equiv)" (bool (m1? ") foo bar")))
-    (test-true "m1 (middle)" (bool (m1? " ) foo bar ")))
-    (test-false "m1 (no)" (bool (m1? " foo bar")))))
+(define-test-case query-tests default ()
+  (test-equal '("2008-12-05" 42) (q-dt ""))
+  (test-equal '("2008-12-05" 43) (q-dt "(days 43)")))
+
+(define-test-case query-tests matching ()
+  (let ((m1? (q-m ") foo bar")))
+    (test-eqv #t (bool (m1? ") foo bar")))
+    (test-eqv #t (bool (m1? " ) foo bar ")))
+    (test-eqv #f (bool (m1? " foo bar")))))
+
+(run-test-suite query-tests)
