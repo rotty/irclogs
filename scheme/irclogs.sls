@@ -48,7 +48,7 @@
           (xitomatl irregex)
           (fmt)
           (prometheus)
-          (sxml simple)
+          (irclogs xml-utils)
           (irclogs parse)
           (irclogs query)
           (irclogs utils))

@@ -40,8 +40,7 @@
         (spells misc)
         (spells tracing)
         (fmt)
-        (sxml simple)
-        (sxml transform)
+        (xitomatl ssax tree-trans)
         (sbank glib)
         (sbank glib-daemon)
         (sbank gobject)
@@ -49,6 +48,7 @@
         (sbank typelib)
         (sbank ctypes basic)
         (irclogs utils)
+        (irclogs xml-utils)
         (irclogs))
 
 (define (main argv)
