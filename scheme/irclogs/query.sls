@@ -50,6 +50,7 @@
           (spells alist)
           (spells misc)
           (spells tracing)
+          (spells match)
           (fmt)
           (irclogs parse)
           (irclogs utils))
@@ -138,19 +139,16 @@
           (loop (cons (maker sub-exprs) match-exprs) next-id (cdr lst))))
       (if (null? lst)
           (values i (reverse match-exprs))
-          (cond ((and (pair? (car lst))
-                      (pair? (cdar lst))
-                      (null? (cddar lst)))
-                 (case (caar lst)
-                   ((rx)   (handle-leaf (msg-rx-match-expr i (cadar lst))))
-                   ((nick) (handle-leaf (nick-str-match-expr i (cadar lst))))
-                   ((and)  (handle-compound and-match-expr (cdar lst)))
-                   (else   (loop match-exprs i (cdr lst)))))
-                ((->str (car lst))
-                 => (lambda (s)
-                      (handle-leaf (msg-str-match-expr i s))))
-                (else
-                 (loop match-exprs i (cdr lst)))))))
+          (match (car lst)
+            (('rx rx)      (handle-leaf (msg-rx-match-expr i rx)))
+            (('nick nick)  (handle-leaf (nick-str-match-expr i nick)))
+            (('and . subs) (handle-compound and-match-expr subs))
+            (elt
+             (cond ((->str elt)
+                    => (lambda (s)
+                         (handle-leaf (msg-str-match-expr i s))))
+                   (else
+                    (loop match-exprs i (cdr lst)))))))))
 
   (define (query-parts->match-expr parts)
     (let*-values (((next-id subs) (match-exprs/ids 0 parts))
@@ -237,3 +235,7 @@
     (string-append "me-l" (number->string (mod id 10))))
 
   )
+
+;; Local Variables:
+;; scheme-indent-styles: ((match 1))
+;; End:
