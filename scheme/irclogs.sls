@@ -44,14 +44,20 @@
           (spells pathname)
           (spells filesys)
           (spells string-utils)
+          (spells define-values)
           (spells tracing)
           (xitomatl irregex)
           (fmt)
           (prometheus)
-          (irclogs xml-utils)
+          (spenet path-dispatch)
+          (spenet xml-utils)
+          (spenet http)
+          (spenet httpd responses)
+          (spenet utils)
           (irclogs parse)
           (irclogs query)
-          (irclogs utils))
+          (irclogs utils)
+          (irclogs page))
 
   (define (merge-state state changed-logs)
     (let ((changed-days (map car changed-logs)))
@@ -299,11 +305,12 @@
                         (width 66)))))
           |#))
 
-  (define (channel-days-tds base-url tag channel pin? days prop-vec . args)
+  (define (channel-days-tds self tag channel pin? days prop-vec . args)
     (let-optionals* args ((start 0)
                           (end (vector-length days))
                           (with-day? #f))
-      (let ()
+      (let ((static-url (self 'static-url))
+            (base-url (self 'base-url)))
         (define (text day count)
           (cond ((and with-day? count)
                  (ssubst "{0} ({1})" (caddr day) count))
@@ -318,7 +325,7 @@
            (if pin?
                `((td (^ (class "pin"))
                       ,(date-link base-url tag channel (apply mk-date day)
-                                  `(img (^ (src ,(string-append base-url "static/pin.png"))
+                                  `(img (^ (src ,(string-append static-url "pin.png"))
                                            (alt "v")
                                            (width 16) (height 16)))
                                   '())))
@@ -359,7 +366,7 @@
              (br)
              (input (^ (type "submit") (name "search-btn") (value "Search"))))))
 
-  (define (channel-monthly-table base-url tag channel n-columns days prop-vec start end)
+  (define (channel-monthly-table self tag channel n-columns days prop-vec start end)
     (let ((count (exact (truncate (ceiling (/ (- end start) n-columns))))))
       `(table
         (^ (class "mactivity"))
@@ -369,13 +376,13 @@
                 (let* ((n-vals (min n-columns (- end i)))
                        (n-empty (if (= count 1) 0 (* 2 (- n-columns n-vals)))))
                   (loop (append
-                         `((tr ,@(channel-days-tds base-url tag channel #t days prop-vec
+                         `((tr ,@(channel-days-tds self tag channel #t days prop-vec
                                                    i (+ i n-vals) #t)
                                ,@(make-list n-empty '(td))))
                          markup)
                         (+ i n-columns))))))))
 
-  (define (log-search-task heading port log-port match?)
+  (define (log-search-task heading port log-port match? yield)
     (receive (msg-count first?)
              (filter-fold-log-file/shtml
               log-port
@@ -386,7 +393,7 @@
                 (sxml->xml shtml port)
                 #f)
               #t)
-      (yield/c #t)
+      (yield #t)
       msg-count))
 
   (define render-log-js
@@ -588,31 +595,29 @@
       ((define-privates name ...)
        (begin (define name (list 'name)) ...))))
 
-  (define-syntax let-privates
-    (syntax-rules ()
-      ((let-privates (name ...) body ...)
-       (let ((name (list 'name)) ...)
-         body ...))))
-
   (define-privates
     %set-log-dir! %set-state-dir!
     %set-dir-struct!
-    %get-state
-    %set-base-url! %set-homepage-url!
+    
+    %set-base-url!
+    %set-homepage-url!
+    %set-static-url!
+    
     %matcher %set-matcher!
     %set-search-n-days!
-    %set-footer-sxml!
-    %render-multi-overview/html
-    %render-channel-overview/html
-    %render-search-task
-    %render-search-footer
-
-    %day-range-search-task
-    %activity-nav-links
-    %log-nav-links)
+    %set-footer-sxml!)
 
   (define *irclogs* (*the-root-object* 'clone))
 
+  (define-values (irclogs-dispatcher irclogs-path)
+    (path-dispatch-rules
+     (((path-arg/string*) (path-arg/string*))
+      render-overview)
+     (((path-arg/string) (path-arg/string) (path-arg/iso-date))
+      render-log)
+     (else
+      #f)))
+  
   (define (make-irclogs options)
     (let ((logs (*irclogs* 'clone)))
       (for-each (lambda (entry)
@@ -621,6 +626,7 @@
                     ((state-dir) (logs %set-state-dir! (pathname-as-directory (cadr entry))))
                     ((dir-struct) (logs %set-dir-struct! (cadr entry)))
                     ((base-url)   (logs %set-base-url! (cadr entry)))
+                    ((static-url) (logs %set-static-url! (cadr entry)))
                     ((homepage-url) (logs %set-homepage-url! (cadr entry)))
                     ((match)      (logs %set-matcher! (sexp->matcher (cadr entry))))
                     ((search-n-days) (logs %set-search-n-days! (cadr entry)))
@@ -628,39 +634,60 @@
                     (else
                      (error 'make-irclogs "unknown option" entry))))
                 options)
+      (modify-object! logs
+        ((dispatch self resend path request)
+         (let* ((file-path? (not (or (null? path)
+                                     (string=? (last path) ""))))
+                (trimmed-path (trim-path path)))
+           (cond ((irclogs-dispatcher trimmed-path)
+                  => (lambda (renderer)
+                       (if file-path?
+                           (make-error-response
+                            (http-status moved-perm)
+                            request
+                            (uri-with-directory-path (http-request/uri request)))
+                           (or (and=> (renderer self request)
+                                      (lambda (shtml)
+                                        (shtml-response-page self
+                                                             request
+                                                             shtml)))
+                               (not-found-response-page self request)))))
+                 (else
+                  (not-found-response-page self request))))))
       logs))
 
-  (define-method (*irclogs* 'render-overview/html self resend just-meta? tag channel query)
-    (let ((base-url (self 'base-url))
-          (base-date (or (query-date query) (current-date 0)))
-          (n-days (cond ((and tag channel) 365)
-                        (else                7))))
+  (define (render-overview self request tag channel)
+    (let* ((query (http-request/uri-query-alist request))
+           (base-date (or (query-date query) (current-date 0)))
+           (n-days (cond ((and tag channel) 365)
+                         (else                7))))
       (cond
        ((and tag channel (assq-ref query 'q))
-        => (lambda (q) (self %render-search-task tag channel base-date q)))
+        => (lambda (q) (render-search-task self tag channel base-date q)))
        (else
-        (let ((state (self %get-state tag channel base-date n-days)))
+        (let ((state (get-state self tag channel base-date n-days)))
           (receive (days rows)
                    (state-tabularize (state-sort `((1 ,string<? ,string=?)
                                                    (2 ,string<? ,string=?)
                                                    (0 ,< ,=))
                                                  state))
             (let ((n-rows (length rows)))
-              (cond ((= n-rows 0)
-                     #f)
-                    ((and tag channel)
-                     (assert (= n-rows 1))
-                     (self %render-channel-overview/html tag channel days (cadar rows)))
-                    (else
-                     (self %render-multi-overview/html
-                           tag channel (or (query-date query) (current-date 0)) days rows))))))))))
-
-  (define-method (*irclogs* %render-multi-overview/html self resend tag channel base-date days rows)
+              (cond
+                ((= n-rows 0)
+                 #f)
+                ((and tag channel)
+                 (assert (= n-rows 1))
+                 (render-channel-overview self tag channel days (cadar rows)))
+                (else
+                 (render-multi-overview self tag channel base-date days rows))))))))))
+  
+  (define (render-multi-overview self tag channel base-date days rows)
     (let ((base-url (self 'base-url))
           (n-days (min 7 (vector-length days))))
       (and (> n-days 0)
-           `((h1 ,(breadcrumbs base-url tag channel #f))
-             ,(self %activity-nav-links tag channel base-date n-days 7)
+           `((meta (title ,(ssubst "IRC activity for {0} channels" tag)))
+             (h1 ,(breadcrumbs base-url tag channel #f))
+             ,(activity-nav-links self tag channel base-date n-days 7)
              (table
               (^ (class "activity"))
               (thead
@@ -674,45 +701,51 @@
                         (receive (tag channel) (apply values (car row))
                           `(tr (th ,(tag-link base-url tag))
                                (th ,(channel-link base-url tag channel))
-                               ,@(channel-days-tds base-url tag channel #f days
+                               ,@(channel-days-tds self tag channel #f days
                                                    (cadr row) 0 n-days))))
                       rows)))
              ,(footer self)))))
 
-  (define-method (*irclogs* %render-channel-overview/html self resend tag channel days prop-vec)
-    (let ((base-url (self 'base-url)))
-      `((h1 ,(breadcrumbs base-url tag channel #f))
+  (define (render-channel-overview self tag channel days prop-vec)
+    (let ((static-url (self 'static-url))
+          (base-url (self 'base-url)))
+      `((meta (title ,(ssubst "IRC activity for {0}/{1}" tag channel)))
+        (h1 ,(breadcrumbs base-url tag channel #f))
         ,(search-form base-url tag channel)
-        ,(self %activity-nav-links tag channel
-               (apply mk-date (vector-ref days 0)) (vector-length days) 365)
+        ,(activity-nav-links self tag channel
+                             (apply mk-date (vector-ref days 0))
+                             (vector-length days)
+                             365)
         ,@(append-map
            (lambda (month-borders)
-             (receive (year month day) (apply values (vector-ref days (car month-borders)))
+             (receive (year month day)
+                      (apply values (vector-ref days (car month-borders)))
                (list `(h2 ,(month-string (mk-date year month day)))
-                     (channel-monthly-table base-url tag channel 7 days prop-vec
-                                            (car month-borders) (cdr month-borders)))))
+                     (channel-monthly-table
+                      self tag channel 7 days prop-vec
+                      (car month-borders) (cdr month-borders)))))
            (days-month-borders days)))))
 
-  (define-method (*irclogs* 'render-log/html self resend just-meta? tag channel date-str)
-    (let ((date (parse-date date-str)))
-      (and date
-           (let ((base-url (self 'base-url)))
-             (and-let* ((port (self 'open-log-file tag channel date)))
-               (call-with-port port
-                 (lambda (port)
-                   `((meta (js-include "jquery.js")
-                           (js-include "sitelib.js")
-                           (js-text ,render-log-js))
-                     (h1 ,(breadcrumbs base-url tag channel date))
-                     ,(self %log-nav-links tag channel date)
-                     (form (^ (id "options")
-                              (action ,(day-url base-url tag channel date)))
-                           (span
-                            "Events: "
-                            (input (^ (type "checkbox") (name "events") (value "on"))))
-                           (input (^ (type "submit") (name "opt-btn") (value "Apply"))))
-                     ,(log-file->shtml port)
-                     ,(footer self)))))))))
+  (define (render-log self request tag channel date)
+    (let ((base-url (self 'base-url)))
+      (and-let* ((port (self 'open-log-file tag channel date)))
+        (call-with-port port
+          (lambda (port)
+            `((meta (title
+                     ,(ssubst "IRC log for {0}/{1} {2}" tag channel date))
+                    (js-include "jquery.js")
+                    (js-include "sitelib.js")
+                    (js-text ,render-log-js))
+              (h1 ,(breadcrumbs base-url tag channel date))
+              ,(log-nav-links self tag channel date)
+              (form (^ (id "options")
+                       (action ,(day-url base-url tag channel date)))
+                    (span
+                     "Events: "
+                     (input (^ (type "checkbox") (name "events") (value "on"))))
+                    (input (^ (type "submit") (name "opt-btn") (value "Apply"))))
+              ,(log-file->shtml port)
+              ,(footer self)))))))
 
   (define-method (*irclogs* 'update-state self resend)
     (let ((state-dir (self 'state-dir))
@@ -746,7 +779,7 @@
           (lambda (port)
             (write (date->string (current-date 0) date-fmt) port))))))
 
-  (define-method (*irclogs* %get-state self resend tag channel base-date n-days)
+  (define (get-state self tag channel base-date n-days)
     (let* ((start-time (date+days->time-utc base-date (- n-days)))
            (start-date (time-utc->date start-time 0))
            (end-time (date->time-utc base-date))
@@ -792,13 +825,13 @@
   (define-method (*irclogs* 'open-log-file self resend tag channel date)
     (and
      ;; call %get-state to ensure we are indeed serving that channel
-     (not (null? (self %get-state tag channel date 1)))
+     (not (null? (get-state self tag channel date 1)))
      (let ((path (log-path (self 'log-dir) (cons 'year (self 'dir-struct)) tag channel date)))
        (and (file-exists? path)
             (file-readable? path)
             (transcoded-port (open-file-input-port (x->namestring path)) (native-transcoder))))))
 
-  (define-method (*irclogs* %render-search-task self resend tag channel base-date q)
+  (define (render-search-task self tag channel base-date q)
     (let ((search (query->search q base-date (self 'search-n-days))))
       `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
         ,(search-form (self 'base-url) tag channel)
@@ -807,26 +840,28 @@
         (table
          (^ (class "log"))
          (task
-          ,(lambda (port)
+          ,(lambda (port yield)
              (call/cc
               (lambda (finish)
                 (let ((timer (start-timer)))
                   (define (escaper date day-count msg-count)
                     (when (>= (timer) (self 'search-timeout))
                       (finish
-                       (self %render-search-footer
-                             tag channel
-                             day-count msg-count (timer)
-                             (redate-search search date)))))
+                       (render-search-footer self
+                                             tag channel
+                                             day-count msg-count (timer)
+                                             (redate-search search date)))))
                   (receive (day-count msg-count)
-                           (self %day-range-search-task port tag channel search escaper)
-                    (self %render-search-footer
-                          tag channel day-count msg-count (timer) #f))))))))
+                           (day-range-search-task self port
+                                                  tag channel search
+                                                  escaper
+                                                  yield)
+                    (render-search-footer self tag channel
+                                          day-count msg-count (timer) #f))))))))
         (task-result)
         ,(footer self))))
 
-  (define-method (*irclogs* %render-search-footer self resend
-                            tag channel day-count msg-count seconds cont-search)
+  (define (render-search-footer self tag channel day-count msg-count seconds cont-search)
     `(div (^ (id "timing"))
           ,(ssubst "Searched {0} messages on {1} days in {2} seconds"
                    msg-count
@@ -842,8 +877,7 @@
                      "Continue search"))
                 '())))
 
-  (define-method (*irclogs* %day-range-search-task self resend
-                            port tag channel search escaper)
+  (define (day-range-search-task self port tag channel search escaper yield)
     (let ((base-url (self 'base-url)))
       (fold-days-between
        (date+days (search-base-date search) 1) ;; from base-date at 24:00
@@ -860,11 +894,12 @@
                  (day-link base-url tag channel date (unparse-date date))
                  port
                  log-port
-                 (search-matcher search)))
+                 (search-matcher search)
+                 yield))
               0))))
        0 0)))
 
-  (define-method (*irclogs* %activity-nav-links self resend tag channel base-date n-days-shown step)
+  (define (activity-nav-links self tag channel base-date n-days-shown step)
     (let ((next-date (date+days base-date step))
           (prev-date (date+days base-date (- n-days-shown)))
           (loc (string-concatenate (append (if tag (list tag "/") '())
@@ -877,7 +912,7 @@
             ,(date-link next-date "<<")
             ,(date-link prev-date ">>"))))
 
-  (define-method (*irclogs* %log-nav-links self resend tag channel date)
+  (define (log-nav-links self tag channel date)
     (let ((next-date (date+days date 1))
           (prev-date (date+days date -1))
           (loc (string-append tag "/" channel "/")))
@@ -893,6 +928,7 @@
   (*irclogs* 'add-value-slot! 'dir-struct %set-dir-struct!
              '(tag (channel "." month "-" day ".log")))
   (*irclogs* 'add-value-slot! 'base-url %set-base-url! "/")
+  (*irclogs* 'add-value-slot! 'static-url %set-static-url! "/static/")
   (*irclogs* 'add-value-slot! 'homepage-url %set-homepage-url! "/static/irclogs.html")
   (*irclogs* 'add-value-slot! %matcher %set-matcher! #f)
   (*irclogs* 'add-value-slot! 'search-n-days %set-search-n-days! 14)
@@ -900,3 +936,7 @@
   (*irclogs* 'add-value-slot! 'footer-sxml %set-footer-sxml! '())
 
   )
+
+;; Local Variables:
+;; scheme-indent-styles: ((modify-object! 1))
+;; End:

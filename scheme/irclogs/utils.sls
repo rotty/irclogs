@@ -34,13 +34,9 @@
    parse-date unparse-date
    fold-days-between
 
-   current-yield yield/c
-
-   make-scheduler scheduler? scheduler-work scheduler-enqueue!
-   scheduler-has-work?
-
    ssubst fprintf println
    url-escape
+   trim-path
    
    host-impl-info-shtml
    )
@@ -48,6 +44,7 @@
                   string-copy string->list
                   string-titlecase string-downcase string-upcase
                   string-hash string-for-each)
+          (only (srfi :1) drop-while last)
           (srfi :8 receive)
           (srfi :13 strings)
           (srfi :14 char-sets)
@@ -58,7 +55,8 @@
           (spells time-lib)
           (spells misc)
           (spells string-utils)
-          (spells tracing))
+          (spells tracing)
+          (spenet uri))
 
   (define (make-timer)
     (let ((start-time (current-time))
@@ -136,69 +134,6 @@
                 (loop (add-duration cur step)
                       (receive new-seeds (apply proc cur-date seeds) new-seeds))))))))
 
-  (define current-yield (make-parameter #f))
-
-  (define (yield/c v)
-    ((current-yield) v))
-
-  (define-record-type scheduler
-    (fields
-     (mutable tasks))
-    (protocol (lambda (p)
-                (lambda ()
-                  (p (empty-queue))))))
-
-  (define *engine-escape* #f)
-  (define *engine-entrance* #f)
-
-  (define (yield . vals)
-    (call/cc
-     (lambda (k)
-       (apply *engine-escape* k vals))))
-
-  (define make-engine
-    (lambda (proc)
-      (lambda (success failure)
-        (let ((engine-succeeded? #f))
-          (receive (resume . results)
-                   (call/cc
-                    (lambda (k)
-                      (set! *engine-escape* k)
-                      (receive results
-                               (call/cc
-                                (lambda (k)
-                                  (set! *engine-entrance* k)
-                                  (receive vals (proc yield)
-                                    (apply *engine-entrance* vals))))
-                        (set! engine-succeeded? #t)
-                        (apply values #f results))))
-            (if engine-succeeded?
-                (apply success results)
-                (failure
-                 (make-engine
-                  (lambda (yield)
-                    (resume 'resume)))
-                 (apply values results))))))))
-
-  (define (scheduler-work scheduler consumer resume?)
-    (and (scheduler-has-work? scheduler)
-         (receive (task remaining-tasks) (queue-remove (scheduler-tasks scheduler))
-           (scheduler-tasks-set! scheduler remaining-tasks)
-           (task consumer
-                 (lambda (e . args)
-                   (if (apply resume? args)
-                       (scheduler-tasks-set! scheduler
-                                             (queue-insert (scheduler-tasks scheduler) e)))))
-           #t)))
-
-  (define (scheduler-has-work? scheduler)
-    (not (queue-empty? (scheduler-tasks scheduler))))
-
-  (define (scheduler-enqueue! scheduler proc)
-    (scheduler-tasks-set! scheduler
-                          (queue-insert (scheduler-tasks scheduler)
-                                        (make-engine proc))))
-
   (define (println fmt . args)
     (string-substitute #t fmt args 'braces)
     (newline))
@@ -247,5 +182,13 @@
                   '()
                   str)))
 
+  (define (trim-path path)
+    (reverse
+     (drop-while (lambda (elt)
+                   (string=? elt ""))
+                 (reverse
+                  (drop-while (lambda (elt)
+                                (string=? elt ""))
+                              path)))))
 
   )
