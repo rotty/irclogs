@@ -37,6 +37,8 @@
    ssubst fprintf println
    url-escape
    trim-path
+
+   pathname-add-file-type
    
    host-impl-info-shtml
    )
@@ -51,10 +53,10 @@
           (srfi :39 parameters)
           (spells opt-args)
           (spells alist)
-          (spells queue)
           (spells time-lib)
           (spells misc)
           (spells string-utils)
+          (spells pathname)
           (spells tracing)
           (spenet uri))
 
@@ -182,6 +184,12 @@
                   '()
                   str)))
 
+  (define (pathname-add-file-type pathname type)
+    (let ((file (pathname-file pathname)))
+      (pathname-with-file pathname
+                          (make-file (file-name file)
+                                     (append (file-types file) (list type))))))
+  
   (define (trim-path path)
     (reverse
      (drop-while (lambda (elt)
