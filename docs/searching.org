@@ -48,25 +48,25 @@ following rules:
   always a list, with the first item indicating the parameter
   name. The following search paramaters are available:
 
-  - date :: Specifies the date that the search will start at. This
+  - ~date~ :: Specifies the date that the search will start at. This
     parameter must be written as ~(date "YYYY-mm-dd")~, i.e. the date
     must be written as a string in the ISO date notation. As noted
     above, the date defaults to the first day displayed on the channel
     overview page.
 
-  - days :: Specifies the number of days the search should cover. Note
-    that the number of days is specifying how far to search *back*, so
-    given a base date of 2008-12-05, and 3 days to search, the search
-    starts at 2008-12-05, 24:00 hours and covers the time back to
-    2008-12-03, 0:00 hours.
+  - ~days~ :: Specifies the number of days the search should
+    cover. Note that the number of days is specifying how far to
+    search *back*, so given a base date of 2008-12-05, and 3 days to
+    search, the search starts at 2008-12-05, 24:00 hours and covers
+    the time back to 2008-12-03, 0:00 hours.
 
    A list of search expressions and how they are used for matching
    follows:
 
-  - strings :: A string indicates a substring match, i.e. there is a
+  - /strings/ :: A string indicates a substring match, i.e. there is a
     match if the message contains the string given at any position.
 
-  - symbols :: For convinience, symbols are converted to strings, and
+  - /symbols/ :: For convinience, symbols are converted to strings, and
     the resulting string is used as above, as a substring match.
 
   - ~(rx <expr>)~ :: A regular expresssion match; ~<expr>~ must be

@@ -1,23 +1,26 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
                "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml"
 lang="en" xml:lang="en">
 <head>
 <title>Searching</title>
-<meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+<meta http-equiv="Content-Type" content="text/html;charset=iso-8859-1"/>
 <meta name="generator" content="Org-mode"/>
-<meta name="generated" content="2009-02-07 16:46:13 CET"/>
+<meta name="generated" content="2009-06-23 13:33:28 CEST"/>
 <meta name="author" content="Andreas Rottmann"/>
+<meta name="description" content=""/>
+<meta name="keywords" content=""/>
 <style type="text/css">
  <!--/*--><![CDATA[/*><!--*/
   html { font-family: Times, serif; font-size: 12pt; }
   .title  { text-align: center; }
   .todo   { color: red; }
   .done   { color: green; }
-  .tag    { background-color:lightblue; font-weight:normal }
+  .tag    { background-color: #add8e6; font-weight:normal }
   .target { }
-  .timestamp { color: grey }
-  .timestamp-kwd { color: CadetBlue }
+  .timestamp { color: #bebebe; }
+  .timestamp-kwd { color: #5f9ea0; }
   p.verse { margin-left: 3% }
   pre {
 	border: 1pt solid #AEBDCC;
@@ -30,7 +33,10 @@ lang="en" xml:lang="en">
   table { border-collapse: collapse; }
   td, th { vertical-align: top; }
   dt { font-weight: bold; }
-
+  div.figure { padding: 0.5em; }
+  div.figure p { text-align: center; }
+  .linenr { font-size:smaller }
+  .code-highlighted {background-color:#ffff00;}
   .org-info-js_info-navigation { border-style:none; }
   #org-info-js_console-label { font-size:10px; font-weight:bold;
                                white-space:nowrap; }
@@ -39,13 +45,37 @@ lang="en" xml:lang="en">
   /*]]>*/-->
 </style><link rel="stylesheet" href="common.css" type="text/css" />
                  <link rel="stylesheet" href="docs.css" type="text/css" />
-</head><body>
+<script type="text/javascript">
+<!--/*--><![CDATA[/*><!--*/
+ function CodeHighlightOn(elem, id)
+ {
+   var target = document.getElementById(id);
+   if(null != target) {
+     elem.cacheClassElem = elem.className;
+     elem.cacheClassTarget = target.className;
+     target.className = "code-highlighted";
+     elem.className   = "code-highlighted";
+   }
+ }
+ function CodeHighlightOff(elem, id)
+ {
+   var target = document.getElementById(id);
+   if(elem.cacheClassElem)
+     elem.className = elem.cacheClassElem;
+   if(elem.cacheClassTarget)
+     target.className = elem.cacheClassTarget;
+ }
+/*]]>*///-->
+</script>
+</head>
+<body>
+<div id="content">
 <h1 class="title">Searching</h1>
 
 
 <div id="outline-container-1" class="outline-2">
 <h2 id="sec-1">Quickstart </h2>
-<div id="text-1">
+<div class="outline-text-2" id="text-1">
 
 
 <p>
@@ -63,7 +93,7 @@ for the <a href="http://en.wikipedia.org/wiki/Regular_expression">regular expres
 
 <div id="outline-container-2" class="outline-2">
 <h2 id="sec-2">Details </h2>
-<div id="text-2">
+<div class="outline-text-2" id="text-2">
 
 
 <p>
@@ -119,7 +149,7 @@ always a list, with the first item indicating the parameter
 name. The following search paramaters are available:
 
 <dl>
-<dt>date</dt><dd>
+<dt><code>date</code></dt><dd>
 Specifies the date that the search will start at. This
 parameter must be written as <code>(date "YYYY-mm-dd")</code>, i.e. the date
 must be written as a string in the ISO date notation. As noted
@@ -127,24 +157,24 @@ above, the date defaults to the first day displayed on the channel
 overview page.
 
 </dd>
-<dt>days</dt><dd>
-Specifies the number of days the search should cover. Note
-that the number of days is specifying how far to search <b>back</b>, so
-given a base date of 2008-12-05, and 3 days to search, the search
-starts at 2008-12-05, 24:00 hours and covers the time back to
-2008-12-03, 0:00 hours.
+<dt><code>days</code></dt><dd>
+Specifies the number of days the search should
+cover. Note that the number of days is specifying how far to
+search <b>back</b>, so given a base date of 2008-12-05, and 3 days to
+search, the search starts at 2008-12-05, 24:00 hours and covers
+the time back to 2008-12-03, 0:00 hours.
 
 <p>
 A list of search expressions and how they are used for matching
 follows:
 </p>
 </dd>
-<dt>strings</dt><dd>
+<dt><i>strings</i></dt><dd>
 A string indicates a substring match, i.e. there is a
 match if the message contains the string given at any position.
 
 </dd>
-<dt>symbols</dt><dd>
+<dt><i>symbols</i></dt><dd>
 For convinience, symbols are converted to strings, and
 the resulting string is used as above, as a substring match.
 
@@ -169,10 +199,13 @@ nesting of search expressions, but this is a planned feature.
 </ul>
 </div>
 </div>
-<div id="postamble"><p class="author"> Author: Andreas Rottmann
+<div id="postamble">
+<p class="author"> Author: Andreas Rottmann
 <a href="mailto:a.rottmann@gmx.at">&lt;a.rottmann@gmx.at&gt;</a>
 </p>
-<p class="date"> Date: 2009-02-07 16:46:13 CET</p>
-<p>HTML generated by org-mode 6.14 in emacs 23</p>
-</div></body>
+<p class="date"> Date: 2009-06-23 13:33:28 CEST</p>
+<p class="creator">HTML generated by org-mode 6.27a in emacs 23</p>
+</div>
+</div>
+</body>
 </html>

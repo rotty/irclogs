@@ -63,6 +63,6 @@ Currently, there's no documentation on how to set up an IRClogs
 instance, so if you have questions about that or anything else, want
 to help out, or think you have found a bug, or want to provide any
 other kind of feedback, after having a look at the [[http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=headblob;f=/README][README]], and taking
-a look at the [[http://rottyforge.yi.org/cgi-bin/darcsweb.cgi?r=irclogs;a=summary][Source]] (if you're brave ;-)) I usually hang out on
+a look at the [[http://github.com/rotty/irclogs/tree/master][Source]] (if you're brave ;-)) I usually hang out on
 [[http://rottyforge.yi.org/irclogs/freenode/%23scheme/][irc://freenode/#scheme]] as ~rotty~ -- just send me a ping, but don't
 hold your breath.
