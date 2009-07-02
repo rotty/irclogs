@@ -12,13 +12,7 @@ h1, h2 {
     text-align: center;
 }
 
-#content {
-    float: right;
-    width: 100%;
-}
-
 #nav {
-    float: right;
     width: 100%;
     text-align: center;
     padding: 1em;

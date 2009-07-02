@@ -122,7 +122,8 @@
                                           'abrackets))
                      (iota 10)))))
           )
-         (body ,@body)))
+         (body (div (^ (id "wrap"))
+                    ,@body))))
 
 (define (js-cdata str)
   (xml-cdata-escape str
