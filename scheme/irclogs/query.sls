@@ -51,7 +51,7 @@
           (spells misc)
           (spells tracing)
           (spells match)
-          (fmt)
+          (spells fmt)
           (irclogs parse)
           (irclogs utils))
 

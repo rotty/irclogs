@@ -34,7 +34,7 @@
           (only (srfi :13) string-concatenate)
           (spells match)
           (spells string-utils)
-          (spenet xml-utils)
+          (xitomatl ssax extras)
           (spenet http)
           (spenet httpd responses))
 
