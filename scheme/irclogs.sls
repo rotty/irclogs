@@ -895,12 +895,14 @@
           (+ msg-count
              (or
               (and-let* ((log-port (self 'open-log-file tag channel date)))
-                (log-search-task
-                 (day-link base-url tag channel date (unparse-date date))
-                 port
-                 log-port
-                 (search-matcher search)
-                 yield))
+                (call-with-port log-port
+                  (lambda (log-port)
+                    (log-search-task
+                     (day-link base-url tag channel date (unparse-date date))
+                     port
+                     log-port
+                     (search-matcher search)
+                     yield))))
               0))))
        0 0)))
 
