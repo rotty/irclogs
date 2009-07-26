@@ -1,4 +1,5 @@
-#+TITLE: The IRClogs Scheme system
+#+SETUPFILE: ~/.emacs.d/org-templates/level-2.org
+#+TITLE: IRClogs
 
 IRClogs is a software package written in [[http://en.wikipedia.org/wiki/Scheme_(programming_language)][Scheme]], presenting a web
 interface to a collection of IRC logs.
@@ -27,7 +28,8 @@ interface to a collection of IRC logs.
 - Deal with local time being different from GMT, and possibly
   present times to the user in his timezone
 
-- Add a ~/today/~ alias for the current date
+- Add a ~/today/~ alias for the current date (done, but needs to be
+  exposed in the UI)
 
 - Improve search:
 
@@ -36,7 +38,6 @@ interface to a collection of IRC logs.
   - Allow explicitly specifying base date
   - Highlight matches
   - Allow toggling of events on search result pages as well
-  - Carry search string to the result page
   - Feedback on the interpretation of the query: What base date and
     day count was used, what matchers where constructed
 
