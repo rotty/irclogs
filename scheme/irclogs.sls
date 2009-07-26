@@ -358,12 +358,13 @@
               (else
                (loop (cons (cur-borders) borders) (cadr (vector-ref days i)) i (- i 1)))))))
 
-  (define (search-form base-url tag channel)
+  (define (search-form base-url tag channel q)
     (let ((title (ssubst "Search {0}/{1}" tag channel)))
       `(form (^ (id "search")
                 (action ,(url-escape (ssubst "{0}{1}/{2}/" base-url tag channel) "/"))
                 (accept-charset "utf-8"))
-             (input (^ (name "q") (title ,title) (size 42) (maxlength 2048)))
+             (input (^ (name "q") (title ,title) (size 42) (maxlength 2048)
+                       ,@(if q `((value ,q)) '())))
              (br)
              (input (^ (type "submit") (name "search-btn") (value "Search"))))))
 
@@ -712,7 +713,7 @@
           (base-url (self 'base-url)))
       `((meta (title ,(ssubst "IRC activity for {0}/{1}" tag channel)))
         (h1 ,(breadcrumbs base-url tag channel #f))
-        ,(search-form base-url tag channel)
+        ,(search-form base-url tag channel #f)
         ,(activity-nav-links self tag channel
                              (apply mk-date (vector-ref days 0))
                              (vector-length days)
@@ -839,7 +840,7 @@
   (define (render-search-task self tag channel base-date q)
     (let ((search (query->search q base-date (self 'search-n-days))))
       `((h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
-        ,(search-form (self 'base-url) tag channel)
+        ,(search-form (self 'base-url) tag channel q)
         (div (^ (id "search-desc"))
              "Searching for " (code ,@(match-expr->shtml (search-match-expr search))))
         (table
