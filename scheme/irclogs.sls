@@ -28,14 +28,12 @@
                   list->vector vector->list vector-fill! vector-for-each
                   vector-map)
           (only (srfi :1 lists)
-                append-map concatenate count drop fold iota
+                append-map concatenate count drop
                 last make-list split-at)
           (srfi :2 and-let*)
           (srfi :8 receive)
-          (only (srfi :13 strings)
-                string-concatenate
-                substring/shared)
-          (srfi :26 cut)
+          (only (srfi :13)
+                string-concatenate substring/shared)
           (srfi :43 vectors)
           (spells opt-args)
           (spells alist)
@@ -43,7 +41,6 @@
           (spells time-lib)
           (spells pathname)
           (spells filesys)
-          (spells gzip)
           (spells string-utils)
           (spells define-values)
           (spells foof-loop)
@@ -56,162 +53,12 @@
           (spenet http)
           (spenet httpd responses)
           (spenet utils)
+          (irclogs tree)
+          (irclogs cache)
           (irclogs parse)
           (irclogs query)
           (irclogs utils)
           (irclogs page))
-
-  (define (merge-state state changed-logs)
-    (let ((changed-days (map car changed-logs)))
-      (append (map (lambda (changed-log)
-                     (cons (car changed-log)
-                           (log-file-status (cadr changed-log))))
-                   changed-logs)
-              (filter (lambda (entry)
-                        (not (member (car entry) changed-days)))
-                      state))))
-
-  (define (log-file-status path)
-    (call-with-input-file (x->namestring path)
-      (lambda (port)
-        (loop ((for entry (in-port port read-irc-log-line))
-               (with count 0 (if (member (irc-log-entry-type entry) '("<" "*"))
-                                 (+ count 1)
-                                 count)))
-          => `((message-count ,count))))))
-
-  (define (submatches match names)
-    (map (lambda (name)
-           (cons name (irregex-match-substring match name)))
-         names))
-
-  (define (fold-log-tree log-dir tree-struct proc . seeds)
-    (let ((log-tree-rxs (map construct-rx tree-struct))
-          (placeholders (map extract-placeholders tree-struct)))
-      (receive (loc rxs placeholders . seeds)
-               (apply
-                directory-fold-tree*
-                log-dir
-                (lambda (file-entry loc rxs placeholders . seeds)
-                  (cond ((and (null? (cdr rxs))
-                              (file-readable? file-entry)
-                              (irregex-match (car rxs) (file-namestring file-entry)))
-                         => (lambda (match)
-                              (let ((vals (concatenate
-                                           (cons (submatches match
-                                                             (car placeholders))
-                                                 loc))))
-                                (receive new-seeds (apply proc vals file-entry seeds)
-                                  (apply values #t loc rxs placeholders new-seeds)))))
-                        (else
-                         (apply values #t loc rxs placeholders seeds))))
-                (lambda (dir-entry loc rxs placeholders . seeds)
-                  (cond ((and (not (null? (cdr rxs)))
-                              (irregex-match (car rxs) (file-namestring dir-entry)))
-                         => (lambda (match)
-                              (apply values
-                                     #t
-                                     #t
-                                     (lambda (old-loc old-rxs old-placeholders . new-seeds)
-                                       (apply values #t loc rxs placeholders new-seeds))
-                                     (cons (submatches match (car placeholders)) loc)
-                                     (cdr rxs)
-                                     (cdr placeholders)
-                                     seeds)))
-                        (else
-                         (apply values #t #f #f loc rxs placeholders seeds))))
-                '()
-                log-tree-rxs
-                placeholders
-                seeds)
-        (apply values seeds))))
-
-  (define (log-tree-update-list log-dir tree-struct last-update match?)
-    (define (update-entry vals path lst)
-      (if (and (or (not match?)
-                   (match? vals))
-               (or (not last-update) (time>? (file-modification-time path) last-update)))
-          (let ((key (list (assq-ref vals 'year)
-                           (assq-ref vals 'tag)
-                           (assq-ref vals 'channel)))
-                (month/day (list (and-let* ((m (assq-ref vals 'month)))
-                                   (string->number m))
-                                 (and-let* ((d (assq-ref vals 'day)))
-                                   (string->number d)))))
-            (println "* {0} modified, adding to update list" (x->namestring path))
-            (cond ((assoc key lst)
-                   => (lambda (entry)
-                        (cons (cons key (cons (list month/day path) (cdr entry)))
-                              (filter (lambda (elt)
-                                        (not (eq? elt entry)))
-                                      lst))))
-                  (else
-                   (cons (cons key (list (list month/day path))) lst))))
-          lst))
-    (if last-update
-        (fold (lambda (year entries)
-                (fold-log-tree log-dir
-                               (cons (number->string year) tree-struct)
-                               (lambda (vals path lst)
-                                 (update-entry (cons `(year . ,year) vals) path lst))
-                               entries))
-              '()
-              (year-range (time-utc->date last-update 0) (current-date 0)))
-        (fold-log-tree log-dir (cons 'year tree-struct) update-entry '())))
-
-  (define (year-range start-date end-date)
-    (let ((start-year (date-year start-date))
-          (end-year (date-year end-date)))
-      (iota (+ (- end-year start-year) 1) start-year)))
-
-  (define (pathname-has-type? pathname type)
-    (let ((file (pathname-file pathname)))
-      (and=> (and file (file-type file)) (cut string=? type <>))))
-
-  (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
-
-  (define parse-state-pathname
-    (let ((rx (sre->irregex `(: (submatch-named year (+ digit)) "-"
-                                (submatch-named tag ,ident-sre) "-"
-                                (submatch-named channel (: (+ "#" ,ident-sre)))
-                                ".state"))))
-      (lambda (pathname)
-        (cond ((irregex-match rx (file-namestring pathname))
-               => (lambda (match)
-                    (receive (year tag channel)
-                             (apply values (map cdr (submatches match '(year tag channel))))
-                      (values (string->number year) tag channel))))
-              (else
-               (values #f #f #f))))))
-
-
-
-  (define (resolve-template template vals)
-    (cond ((symbol? template)
-           (assq-ref vals template))
-          ((pair? template)
-           (string-concatenate (map (lambda (part) (resolve-template part vals)) template)))
-          (else
-           template)))
-
-  (define (vals->pathname base vals template)
-    (receive (dir-parts file-part)
-             (split-at (map (lambda (part) (resolve-template part vals)) template)
-                       (- (length template) 1))
-      (make-pathname (pathname-origin base)
-                     (append (pathname-directory base) dir-parts)
-                     (if (pair? (car file-part))
-                         (string-concatenate (car file-part))
-                         (car file-part)))))
-
-  (define (log-path log-dir template tag channel date)
-    (vals->pathname log-dir
-                    `((tag . ,tag)
-                      (channel . ,channel)
-                      (year . ,(num->str (date-year date) 4))
-                      (month . ,(num->str (date-month date) 2))
-                      (day . ,(num->str (date-day date) 2)))
-                    template))
 
   (define (msum numbers) ; (int ...) -> int
     (if (null? numbers)
@@ -487,9 +334,6 @@
                                       (unparse-date date))
                               "/"))
 
-  (define (num->str n width)
-    (fmt #f (pad-char #\0 (pad/left 2 (num n)))))
-
   (define (state-sort keys state)
     (list-sort (lambda (x y)
                  (let loop ((keys keys))
@@ -576,45 +420,6 @@
                                days))
                        '()))
 
-  (define (sexp->matcher expr)
-    (define (submatcher mapper)
-      (let ((sub-matchers (map sexp->matcher (cdr expr))))
-        (lambda (vals)
-          (mapper (lambda (m) (m vals)) sub-matchers))))
-    (case (car expr)
-      ((and) (submatcher and-map))
-      ((or)  (submatcher or-map))
-      (else
-       (let ((rx (irregex (cadr expr))))
-         (lambda (vals)
-           (let ((val (assq-ref vals (car expr))))
-             (irregex-match rx val)))))))
-
-  (define sre-alist
-    `((year . (>= 4 digit))
-      (month . (** 1 2 digit))
-      (day .   (** 1 2 digit))
-      (tag . ,ident-sre)
-      (channel . (: (+ "#") ,ident-sre))))
-
-  (define (construct-rx part)
-    (define (->sre x)
-      (cond ((symbol? x)
-             `(submatch-named ,x ,(or (assq-ref sre-alist x)
-                                      (error 'construct-rx "unknown shorthand" x))))
-            (else x)))
-    (if (pair? part)
-        (sre->irregex (cons ': (map ->sre part)))
-        (sre->irregex (->sre part))))
-
-  (define (extract-placeholders part)
-    (cond ((pair? part)
-           (filter symbol? part))
-          ((symbol? part)
-           (list part))
-          (else
-           '())))
-
   (define (query-date query)
     (let ((val (assq-ref query 'date)))
       (and val
@@ -634,7 +439,8 @@
     %set-base-url!
     %set-homepage-url!
     %set-static-url!
-    
+
+    %cache
     %matcher %set-matcher!
     %set-search-n-days!
     %set-footer-sxml!)
@@ -660,12 +466,17 @@
                     ((base-url)   (logs %set-base-url! (cadr entry)))
                     ((static-url) (logs %set-static-url! (cadr entry)))
                     ((homepage-url) (logs %set-homepage-url! (cadr entry)))
-                    ((match)      (logs %set-matcher! (sexp->matcher (cadr entry))))
+                    ((match)      (logs %set-matcher!
+                                        (sexp->alist-matcher (cadr entry))))
                     ((search-n-days) (logs %set-search-n-days! (cadr entry)))
                     ((footer-sxml) (logs %set-footer-sxml! (cdr entry)))
                     (else
                      (error 'make-irclogs "unknown option" entry))))
                 options)
+      (logs 'add-value-slot! %cache (make-cache (logs 'state-dir)
+                                                (logs 'log-dir)
+                                                (logs 'dir-struct)
+                                                (logs %matcher)))
       (modify-object! logs
         ((dispatch self resend path request)
          (let* ((file-path? (not (or (null? path)
@@ -699,7 +510,7 @@
         => (lambda (q)
              (render-search-task self tag channel base-date q context)))
        (else
-        (let ((state (get-state self tag channel base-date n-days)))
+        (let ((state (cache-get (self %cache) tag channel base-date n-days)))
           (receive (days rows)
                    (state-tabularize (state-sort `((1 ,string<? ,string=?)
                                                    (2 ,string<? ,string=?)
@@ -794,92 +605,17 @@
           ,(footer self)))))
 
   (define-method (*irclogs* 'update-state self resend)
-    (let ((state-dir (self 'state-dir))
-          (log-dir   (self 'log-dir))
-          (tree-struct (self 'dir-struct)))
-      (create-directory* state-dir)
-      (let* ((date-fmt "~Y-~m-~d ~H:~M:~S ~z")
-             (update-file (pathname-with-file state-dir "last-update"))
-             (last-update (and-let* ((date-str (and (file-exists? update-file)
-                                                    (call-with-input-file (x->namestring update-file)
-                                                      read))))
-                            (date->time-utc (string->date date-str date-fmt)))))
-        (for-each (lambda (entry)
-                    (let ((state-file (pathname-with-file
-                                       state-dir
-                                       (string-substitute "{0}-{1}-{2}.state" (car entry))))
-                          (tag (caar entry))
-                          (channel (cadar entry))
-                          (year (caddar entry)))
-                      (println "{0} {1}/{2}: {3} days updated" year tag channel (length (cdr entry)))
-                      (call-with-output-file/atomic state-file
-                        (lambda (port)
-                          (write (merge-state
-                                  (if (file-exists? state-file)
-                                      (call-with-input-file (x->namestring state-file) read)
-                                      '())
-                                  (cdr entry))
-                                 port)))))
-                  (log-tree-update-list log-dir tree-struct last-update (self %matcher)))
-        (call-with-output-file/atomic update-file
-          (lambda (port)
-            (write (date->string (current-date 0) date-fmt) port))))))
-
-  (define (get-state self tag channel base-date n-days)
-    (let* ((start-time (date+days->time-utc base-date (- n-days)))
-           (start-date (time-utc->date start-time 0))
-           (end-time (date->time-utc base-date))
-           (end-date base-date)
-           (state-dir (self 'state-dir)))
-      (define (date-match? year)
-        (or (eqv? base-date #f) (<= (date-year start-date) year (date-year end-date))))
-      (define (filter-days year entries)
-        (if (not base-date)
-            entries
-            (filter (lambda (entry)
-                      (receive (month day) (apply values (car entry))
-                        (let ((entry-time (date->time-utc (mk-date year month day))))
-                          (and (time<=? start-time entry-time)
-                               (time<=? entry-time end-time)))))
-                    entries)))
-      (if (file-exists? state-dir)
-          (directory-fold
-           state-dir
-           (lambda (entry state)
-             (if (and (pathname-has-type? entry "state")
-                      (file-readable? entry))
-                 (receive (st-year st-tag st-channel) (parse-state-pathname entry)
-                   (if (and st-year st-tag st-channel
-                            (date-match? st-year)
-                            (or (eqv? tag #f)  (string=? tag st-tag))
-                            (or (eqv? channel #f) (string=? channel st-channel))
-                            ((self %matcher) `((year . ,st-year)
-                                               (tag . ,st-tag)
-                                               (channel . ,st-channel))))
-                       (let ((entries
-                              (filter-days st-year
-                                           (call-with-input-file (x->namestring entry) read))))
-                         (cons (cons* st-year st-tag st-channel entries) state))
-                       state))
-                 state))
-           '())
-          (begin
-            (create-directory* state-dir)
-            '()))))
-
-
+    (update-cache (self %cache)))
+  
   (define-method (*irclogs* 'open-log-file self resend tag channel date)
     (and
-     ;; call %get-state to ensure we are indeed serving that channel
-     (not (null? (get-state self tag channel date 1)))
-     (let ((path (log-path (self 'log-dir) (cons 'year (self 'dir-struct)) tag channel date)))
-       (or (and (file-exists? path)
-                (file-readable? path)
-                (transcoded-port (open-file-input-port (x->namestring path)) (native-transcoder)))
-           (and-let* ((path-gz (pathname-add-file-type path "gz"))
-                      ((file-exists? path-gz))
-                      ((file-readable? path-gz)))
-             (transcoded-port (open-gz-file-input-port path-gz) (native-transcoder)))))))
+      ;; guard against non-served channels
+      ((self %matcher) `((tag . ,tag)
+                         (channel . ,channel)
+                         (year . ,(date-year date))))
+      (open-log-file (self 'log-dir)
+                     (cons 'year (self 'dir-struct))
+                     tag channel date)))
 
   (define (render-search-task self tag channel base-date q context)
     (let ((search (query->search q base-date (self 'search-n-days) context)))

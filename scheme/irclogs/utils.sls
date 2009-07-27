@@ -40,6 +40,14 @@
     trim-path
 
     pathname-add-file-type
+    pathname-has-file-type?
+    pathname-strip-file-type
+    
+    ident-sre
+    sexp->alist-matcher
+    
+    irregex-submatches
+    irregex-submatch-alist
     
     host-impl-info-shtml
    )
@@ -47,10 +55,11 @@
                   string-copy string->list
                   string-titlecase string-downcase string-upcase
                   string-hash string-for-each)
-          (only (srfi :1) drop-while last)
+          (only (srfi :1) drop-while drop-right last)
           (srfi :8 receive)
           (srfi :13 strings)
           (srfi :14 char-sets)
+          (srfi :26 cut)
           (srfi :39 parameters)
           (spells opt-args)
           (spells alist)
@@ -58,6 +67,7 @@
           (spells misc)
           (spells string-utils)
           (spells pathname)
+          (spells irregex)
           (spells tracing)
           (spenet uri))
 
@@ -208,4 +218,41 @@
                                 (string=? elt ""))
                               path)))))
 
-  )
+  (define (irregex-submatch-alist match names)
+    (map (lambda (name)
+           (cons name (irregex-match-substring match name)))
+         names))
+
+  (define (irregex-submatches match names)
+    (map (cut irregex-match-substring match <>) names))
+
+  (define (sexp->alist-matcher expr)
+    (define (submatcher mapper)
+      (let ((sub-matchers (map sexp->alist-matcher (cdr expr))))
+        (lambda (vals)
+          (mapper (lambda (m) (m vals)) sub-matchers))))
+    (case (car expr)
+      ((and) (submatcher and-map))
+      ((or)  (submatcher or-map))
+      (else
+       (let ((rx (irregex (cadr expr))))
+         (lambda (vals)
+           (let ((val (assq-ref vals (car expr))))
+             (irregex-match rx val)))))))
+
+  (define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
+
+  (define (pathname-has-file-type? pathname type)
+    (let ((file (pathname-file pathname)))
+      (and=> (and file (file-type file)) (cut string=? type <>))))
+
+  ;; Taken from conjure, probably makes sense to put into spells
+  (define (pathname-strip-file-type pathname type)
+    (let* ((file (pathname-file pathname))
+           (types (file-types file)))
+      (if (and (not (null? types))
+               (equal? (last types) type))
+          (pathname-with-file pathname
+                              (make-file (file-name file) (drop-right types 1)))
+          pathname)))
+)
