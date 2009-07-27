@@ -24,23 +24,24 @@
 
 (library (irclogs utils)
   (export
+    list-intersperse
+    
+    make-timer start-timer
 
-   make-timer start-timer
+    time-*
+    date-with-zone-offset
+    mk-date
+    date+days date+days->time-utc
+    parse-date unparse-date
+    fold-days-between
 
-   time-*
-   date-with-zone-offset
-   mk-date
-   date+days date+days->time-utc
-   parse-date unparse-date
-   fold-days-between
+    ssubst fprintf println
+    url-escape
+    trim-path
 
-   ssubst fprintf println
-   url-escape
-   trim-path
-
-   pathname-add-file-type
-   
-   host-impl-info-shtml
+    pathname-add-file-type
+    
+    host-impl-info-shtml
    )
   (import (except (rnrs)
                   string-copy string->list
@@ -60,6 +61,14 @@
           (spells tracing)
           (spenet uri))
 
+  (define (list-intersperse lst item)
+    (if (null? lst)
+        lst
+        (let loop ((lst (cdr lst)) (result (cons (car lst) '())))
+          (if (null? lst)
+              (reverse result)
+              (loop (cdr lst) (cons* (car lst) item result))))))
+  
   (define (make-timer)
     (let ((start-time (current-time))
           (stop-time #f))

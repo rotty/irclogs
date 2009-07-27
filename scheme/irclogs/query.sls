@@ -30,6 +30,7 @@
 
           search-base-date
           search-n-days
+          search-context
           search-match-expr
           search-matcher
           redate-search
@@ -56,7 +57,7 @@
           (irclogs utils))
 
   (define-record-type search
-    (fields base-date n-days match-expr))
+    (fields base-date n-days context match-expr))
 
   (define (search-matcher search)
     (match-expr-matcher (search-match-expr search)))
@@ -71,12 +72,13 @@
                       (- (date->julian-day
                           (search-base-date search))
                          (date->julian-day base-date)))))
+                 (search-context search)
                  (search-match-expr search)))
 
   (define-record-type match-expr
     (fields id tag children matcher))
 
-  (define (query->search q base-date n-days)
+  (define (query->search q base-date n-days context)
     (let ((parts
            (let ((port (open-string-input-port q)))
              (let loop ((i 0) (parts '()))
@@ -98,11 +100,12 @@
              parts))
       (make-search
        (or (and-let* ((d (parts-ref 'date)))
-                      (parse-date d))
-                    base-date)
+             (parse-date d))
+           base-date)
        (or (and-let* ((d (parts-ref 'days)))
              (and (integer? d) d))
            n-days)
+       context
        (query-parts->match-expr parts))))
 
   (define (search->query search)
@@ -210,7 +213,7 @@
 
   (define (match-expr->shtml m)
     (define (children-shtml)
-      (map match-expr->shtml (match-expr-children m)))
+      (list-intersperse (map match-expr->shtml (match-expr-children m)) " "))
     (define (children-text)
       (string-join (map (lambda (child)
                           (fmt #f (wrt child)))

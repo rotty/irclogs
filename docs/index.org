@@ -33,7 +33,6 @@ interface to a collection of IRC logs.
 
 - Improve search:
 
-  - Links directly to log at the times of the hits
   - Specify amount of context around a message to show
   - Allow explicitly specifying base date
   - Highlight matches

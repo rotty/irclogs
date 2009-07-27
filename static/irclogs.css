@@ -2,18 +2,13 @@ body {
   background-color: white;
   color: #000;
   font-family: sans-serif;
-  background: white;
-  padding: 0px;
-  margin: 0px;
 }
 
 h1, h2 {
-    width: 100%;
     text-align: center;
 }
 
 #nav {
-    width: 100%;
     text-align: center;
     padding: 1em;
 }
@@ -30,6 +25,14 @@ h1, h2 {
     padding: 1em;
 }
 
+div#wrap {
+    margin-top: 5%;
+    background: white;
+    padding-bottom: 1em;
+    padding-left: 2em;
+    padding-right: 2em;
+}
+
 #options span {
     padding-left: 1em;
     padding-right: 1em;
@@ -37,8 +40,13 @@ h1, h2 {
 
 #timing {
     text-align: center;
-    padding: 1em;
+    padding-top: 1em;
     font-style: italic;
+}
+
+.centered {
+    float: left;
+    width: 100%;
 }
 
 #foot {
@@ -52,6 +60,10 @@ h1, h2 {
     text-align: center;
 }
 
+#search input {
+    margin-top: 0.5em;
+}
+
 #search-desc {
     text-align: center;
     padding: 0.5em;
@@ -60,6 +72,7 @@ h1, h2 {
 table.log {
     margin-left: auto;
     margin-right: auto;
+    float: left;
 }
 
 table.log th {

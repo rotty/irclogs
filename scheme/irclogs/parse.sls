@@ -1,6 +1,6 @@
 ;;; parse.sls --- Parse IRC logs
 
-;; Copyright (C) 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -30,8 +30,7 @@
           irc-log-entry-type
           irc-log-entry-nick
           irc-log-entry-message
-          fold-irc-log-file
-          parse-irc-log-file)
+          read-irc-log-line)
   (import (rnrs)
           (srfi :2 and-let*)
           (srfi :8 receive)
@@ -74,7 +73,7 @@
   (define-record-type irc-log-entry
     (fields hours minutes seconds type nick message))
 
-  (define (parse-line str)              ; str -> list
+  (define (parse-line str)
     (define (submatches match names)
       (map (lambda (name)
              (if (or (symbol? name) (integer? name))
@@ -87,13 +86,10 @@
                 log-formats)
         (make-irc-log-entry #f #f #f #f #f str)))
 
-  (define (parse-irc-log-file port)
-    (reverse (fold-irc-log-file port cons '())))
-
-  (define (fold-irc-log-file port combiner . seeds)
-    (let loop ((seeds seeds))
-      (let ((line (get-line port)))
-        (if (eof-object? line)
-            (apply values seeds)
-            (receive new-seeds (apply combiner (parse-line line) seeds)
-              (loop new-seeds)))))))
+  ;;@ Read a line from @1, returning either an irc-log-entry, or the
+  ;;eof-object.
+  (define (read-irc-log-line port)
+    (let ((line (get-line port)))
+      (if (eof-object? line)
+          line
+          (parse-line line)))))
