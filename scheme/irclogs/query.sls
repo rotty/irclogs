@@ -46,7 +46,7 @@
           (only (srfi :1 lists) any unfold filter-map concatenate)
           (only (srfi :13 strings) string-contains string-join)
           (srfi :19 time)
-          (xitomatl irregex)
+          (spells irregex)
           (spells alist)
           (spells misc)
           (spells tracing)

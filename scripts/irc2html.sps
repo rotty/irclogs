@@ -37,9 +37,8 @@
         (spells pathname)
         (spells misc)
         (spells tracing)
-        (only (spells assert) cout)
-        (fmt)
-        (xitomatl irregex)
+        (spells fmt)
+        (spells irregex)
         (irclogs utils))
 
 (define colors '("e" "c" "a"))
@@ -105,7 +104,6 @@
                   (cons (escaper c) parts))
                 '()
                 str)))
-(define ident-sre '(+ (or alnum #\- #\_ #\* #\+)))
 
 (define log-templates
   (map

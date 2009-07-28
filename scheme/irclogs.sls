@@ -47,7 +47,7 @@
           (spells string-utils)
           (spells define-values)
           (spells tracing)
-          (xitomatl irregex)
+          (spells irregex)
           (spells fmt)
           (prometheus)
           (spenet path-dispatch)
