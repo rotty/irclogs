@@ -24,27 +24,28 @@
 
 (library (irclogs parse)
   (export make-irc-log-entry
-          irc-log-entry-hours
-          irc-log-entry-minutes
-          irc-log-entry-seconds
+          irc-log-entry-date
           irc-log-entry-type
           irc-log-entry-nick
           irc-log-entry-message
-          read-irc-log-line)
+          irc-log-entry-time-utc
+          irc-log-reader)
   (import (rnrs)
           (srfi :2 and-let*)
           (srfi :8 receive)
+          (srfi :19 time)
           (spells pathname)
           (spells misc)
+          (spells match)
           (spells tracing)
           (xitomatl irregex))
 
   (define special-sre '("[]\\`_^{|}"))
   (define nick-sre `(: (or alpha ,special-sre) (* (or alnum ,special-sre "-"))))
 
-  (define tm-h-m-s-sre '(: (submatch-named hours (** 1 2 digit)) ":"
-                           (submatch-named minutes (** 1 2 digit)) ":"
-                           (submatch-named seconds (** 1 2 digit))))
+  (define tm-h-m-s-sre '(: (submatch-named hour (** 1 2 digit)) ":"
+                           (submatch-named minute (** 1 2 digit)) ":"
+                           (submatch-named second (** 1 2 digit))))
   (define log-formats
     (map
      (lambda (entry)
@@ -53,27 +54,38 @@
 
      `(
        ;; format used by irssi
-       ((: (submatch-named hours (** 1 2 digit)) ":" (submatch-named minutes (** 1 2 digit))
+       ((: (submatch-named hour (** 1 2 digit))
+           ":" (submatch-named minute (** 1 2 digit))
            (+ white) (submatch-named type (+ (~ white))) (+ white)
            (submatch-named nick ,nick-sre) (? (or ":" ">")) (+ white)
-           (submatch-named line (* any)))
-        (hours minutes #f type nick line))
+           (submatch-named message (* any)))
+        (hour minute #f type nick message))
        ;; format of http://tunes.org/~nef/logs/scheme/
        ((: ,tm-h-m-s-sre (+ white)
            (submatch-named type (or "*" "<")) (? white)
            (submatch-named nick ,nick-sre) (? ">") (+ white)
-           (submatch-named line (* any)))
-        (hours minutes seconds type nick line))
+           (submatch-named message (* any)))
+        (hour minute second type nick message))
        ((: ,tm-h-m-s-sre (+ white) "---" (+ white) (+ (~ white)) ":" (+ white)
            (submatch-named nick ,nick-sre) (+ white)
-           (submatch-named line (* any)))
-        (hours minutes seconds "---" nick line))
+           (submatch-named message (* any)))
+        (hour minute second "---" nick message))
        )))
 
   (define-record-type irc-log-entry
-    (fields hours minutes seconds type nick message))
+    (fields date type nick message))
 
-  (define (parse-line str)
+  (define (irc-log-entry-time-utc entry)
+    (date->time-utc (irc-log-entry-date entry)))
+
+  (define (date-with-h-m-s date h m s)
+    (make-date 0 s h m
+               (date-day date)
+               (date-month date)
+               (date-year date)
+               (date-zone-offset date)))
+  
+  (define (parse-line str date)
     (define (submatches match names)
       (map (lambda (name)
              (if (or (symbol? name) (integer? name))
@@ -81,15 +93,27 @@
                  name))
            names))
     (or (or-map (lambda (irx/tmpl)
-                  (and-let* ((match (irregex-match (car irx/tmpl) str)))
-                    (apply make-irc-log-entry (submatches match (cadr irx/tmpl)))))
+                  (and-let* ((m (irregex-match (car irx/tmpl) str)))
+                    (match-let (((hour minute second type nick message)
+                                 (submatches m (cadr irx/tmpl))))
+                      (let ((h (string->number hour))
+                            (m (string->number minute))
+                            (s (or (and=> second string->number) 0)))
+                        (make-irc-log-entry (date-with-h-m-s date h m s)
+                                            type
+                                            nick
+                                            message)))))
                 log-formats)
-        (make-irc-log-entry #f #f #f #f #f str)))
+        (make-irc-log-entry #f #f #f str)))
 
-  ;;@ Read a line from @1, returning either an irc-log-entry, or the
-  ;;eof-object.
-  (define (read-irc-log-line port)
-    (let ((line (get-line port)))
-      (if (eof-object? line)
-          line
-          (parse-line line)))))
+  (define (irc-log-reader date)
+    (lambda (port)
+      (let ((line (get-line port)))
+        (if (eof-object? line)
+            line
+            (parse-line line date))))))
+
+
+;; Local Variables:
+;; scheme-indent-styles: ((match-let 1))
+;; End:

@@ -101,15 +101,13 @@
 
   (define (log-entry->shtml e count nick-entry-count anchor? wrap-time)
     (define (timed-row class data)
-      (let* ((h (irc-log-entry-hours e))
-             (m (irc-log-entry-minutes e))
-             (s (irc-log-entry-seconds e)))
-        `(tr (^ (class ,(if (= (mod nick-entry-count 2) 0) "even" "odd"))
-                ,@(if anchor?
-                      `((id ,(ssubst "e{0}" count)))
-                      '()))
-             (td (^ (class "time")) ,(wrap-time (ssubst "{0}:{1}" h m) count))
-             (td (^ (class ,class)) ,@data))))
+      `(tr (^ (class ,(if (= (mod nick-entry-count 2) 0) "even" "odd"))
+              ,@(if anchor?
+                    `((id ,(ssubst "e{0}" count)))
+                    '()))
+           (td (^ (class "time")) ,(wrap-time (date->string (irc-log-entry-date e) "~H:~M")
+                                              count))
+           (td (^ (class ,class)) ,@data)))
     (define (nick-class)
       (ssubst "n{0}" (mod (word->integer (irc-log-entry-nick e)) 26)))
     (let ((kind (cond ((irc-log-entry-type e)
@@ -137,8 +135,8 @@
          (values nick-entry-count
                  `(tr (td (^ (class "meta") (colspan 2)) ,message)))))))
 
-  (define (filter-fold-log-file/shtml port pred proc anchor? wrap-time . seeds)
-    (loop continue ((for entry (in-port port read-irc-log-line))
+  (define (filter-fold-log-file/shtml port date pred proc anchor? wrap-time . seeds)
+    (loop continue ((for entry (in-port port (irc-log-reader date)))
                     (for count (up-from 0))
                     (with nick-entry-count 0)
                     (with seeds seeds))
@@ -265,6 +263,7 @@
               (receive (msg-count first?)
                        (filter-fold-log-file/shtml
                         log-port
+                        date
                         (search-matcher search)
                         render-hit
                         #f ;; no anchors
@@ -594,6 +593,7 @@
                          (lambda (log-port)
                            (filter-fold-log-file/shtml
                             log-port
+                            date
                             (lambda (entry) #t)
                             (lambda (shtml)
                               (sxml->xml shtml oport)

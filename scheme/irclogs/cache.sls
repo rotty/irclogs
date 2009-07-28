@@ -36,6 +36,7 @@
           (srfi :19 time)
           (spells alist)
           (spells foof-loop)
+          (spells match)
           (only (spells record-types)
                 define-record-type*
                 define-functional-fields)
@@ -66,22 +67,20 @@
           (now (current-date 0)))
       (create-directory* cache-dir)
       (for-each
-       (lambda (entry)
-         (let ((state-file (pathname-with-file
-                            cache-dir
-                            (string-substitute "{0}-{1}-{2}.state" (car entry))))
-               (tag (caar entry))
-               (channel (cadar entry))
-               (year (caddar entry)))
-           (println "{0} {1}/{2}: {3} days updated" year tag channel (length (cdr entry)))
+       (match-lambda
+        (((year tag channel) . changed-logs)
+         (let ((state-file (state-file-pathname cache-dir year tag channel)))
+           (println "{0} {1}/{2}: {3} days updated"
+                    year tag channel (length changed-logs))
            (call-with-output-file/atomic state-file
              (lambda (port)
-               (write (merge-state
+               (write (update-state
                        (if (file-exists? state-file)
                            (call-with-input-file (x->namestring state-file) read)
                            '())
-                       (cdr entry))
-                      port)))))
+                       year
+                       changed-logs)
+                      port))))))
        (log-tree-update-list log-dir tree-struct last-update fender))
       (call-with-output-file/atomic update-file
         (lambda (port)
@@ -93,13 +92,21 @@
                          read)))
     (date->time-utc (string->date date-str iso-date+time-fmt))))
 
+(define (state-file-pathname cache-dir year tag channel)
+  (pathname-with-file cache-dir
+                      (make-file (ssubst "{0}-{1}-{2}" year tag channel)
+                                 "state")))
+
 ;; Calculate the list of files that have changed since `last-update'
 ;; and need their state files be updated.
+;; The returned list has the following structure:
+;; (((<year> <tag> <channel>) ((<month> <day>) <path>) ...) ...)
 (define (log-tree-update-list log-dir tree-struct last-update match?)
   (define (update-entry vals path lst)
     (if (and (or (not match?)
                  (match? vals))
-             (or (not last-update) (time>? (file-modification-time path) last-update)))
+             (or (not last-update)
+                 (time>? (file-modification-time path) last-update)))
         (let ((key (list (assq-ref vals 'year)
                          (assq-ref vals 'tag)
                          (assq-ref vals 'channel)))
@@ -146,56 +153,55 @@
       (if (not base-date)
           entries
           (filter (lambda (entry)
-                    (receive (month day) (apply values (car entry))
+                    (match-let (((month day) (car entry)))
                       (let ((entry-time (date->time-utc (mk-date year month day))))
                         (and (time<=? start-time entry-time)
                              (time<=? entry-time end-time)))))
                   entries)))
-    (cond
-      ((file-exists? cache-dir)
-       (directory-fold
-        cache-dir
-        (lambda (entry state)
-          (if (and (pathname-has-file-type? entry "state")
-                   (file-readable? entry))
-              (receive (st-year st-tag st-channel) (parse-state-pathname entry)
-                (if (and st-year st-tag st-channel
-                         (date-match? st-year)
-                         (or (eqv? tag #f)  (string=? tag st-tag))
-                         (or (eqv? channel #f) (string=? channel st-channel))
-                         (fender `((year . ,st-year)
-                                   (tag . ,st-tag)
-                                   (channel . ,st-channel))))
-                    (let ((entries
-                           (filter-days st-year
-                                        (call-with-input-file (x->namestring entry) read))))
-                      (cons (cons* st-year st-tag st-channel entries) state))
-                    state))
-              state))
-        '()))
-      (else
-       (create-directory* cache-dir)
-       '()))))
+    (define (state-file-combiner entry state)
+      (if (and (pathname-has-file-type? entry "state")
+               (file-readable? entry))
+          (receive (st-year st-tag st-channel) (parse-state-pathname entry)
+            (if (and st-year st-tag st-channel
+                     (date-match? st-year)
+                     (or (eqv? tag #f)  (string=? tag st-tag))
+                     (or (eqv? channel #f) (string=? channel st-channel))
+                     (fender `((year . ,st-year)
+                               (tag . ,st-tag)
+                               (channel . ,st-channel))))
+                (let ((entries
+                       (filter-days st-year
+                                    (call-with-input-file (x->namestring entry)
+                                      read))))
+                  (cons (cons* st-year st-tag st-channel entries) state))
+                state))
+          state))
+    (cond ((file-exists? cache-dir)
+           (directory-fold cache-dir state-file-combiner '()))
+          (else
+           (create-directory* cache-dir)
+           '()))))
 
-
-(define (merge-state state changed-logs)
+(define (update-state state year changed-logs)
   (let ((changed-days (map car changed-logs)))
-    (append (map (lambda (changed-log)
-                   (cons (car changed-log)
-                         (log-file-status (cadr changed-log))))
+    (append (map (match-lambda
+                  (((and (month day) key) changed-file)
+                   (cons key (log-file-status (mk-date year month day)
+                                              changed-file))))
                  changed-logs)
             (filter (lambda (entry)
                       (not (member (car entry) changed-days)))
                     state))))
 
-(define (log-file-status path)
-  (call-with-input-file (x->namestring path)
-    (lambda (port)
-      (loop ((for entry (in-port port read-irc-log-line))
-             (with count 0 (if (member (irc-log-entry-type entry) '("<" "*"))
-                               (+ count 1)
-                               count)))
-            => `((message-count ,count))))))
+(define (log-file-status date path)
+  (let ((read-entry (irc-log-reader date)))
+    (call-with-input-file (x->namestring path)
+      (lambda (port)
+        (loop ((for entry (in-port port read-entry))
+               (with count 0 (if (member (irc-log-entry-type entry) '("<" "*"))
+                                 (+ count 1)
+                                 count)))
+          => `((message-count ,count)))))))
 
 (define parse-state-pathname
   (let ((rx (sre->irregex `(: (submatch-named year (+ digit)) "-"
