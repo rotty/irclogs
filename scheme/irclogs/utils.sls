@@ -33,8 +33,13 @@
     mk-date
     date+days date+days->time-utc
     parse-date unparse-date
-    fold-days-between
+    todays-date
+    date-day=?
+    date-up-from
+    date-down-from
 
+    in-stream
+    
     ssubst fprintf println
     url-escape
     trim-path
@@ -65,6 +70,7 @@
           (spells alist)
           (spells time-lib)
           (spells misc)
+          (spells lazy-streams)
           (spells string-utils)
           (spells pathname)
           (spells irregex)
@@ -120,14 +126,24 @@
   (define (mk-date year month day)
     (make-date 0 0 0 0 day month year 0))
 
-  (define *one-day* (make-time time-duration 0 (* 24 60 60)))
+  (define one-day (make-time time-duration 0 (* 24 60 60)))
 
   (define (date+days->time-utc date n-days)
-    (let ((step (time-* n-days *one-day*)))
+    (let ((step (time-* n-days one-day)))
       (add-duration (date->time-utc date) step)))
 
   (define (date+days date n-days)
     (time-utc->date (date+days->time-utc date n-days) 0))
+
+  (define (todays-date zone-offset)
+    (let ((now (current-date zone-offset)))
+      (make-date 0 0 0 0 (date-day now) (date-month now) (date-year now)
+                 zone-offset)))
+
+  (define (date-day=? d1 d2)
+    (and (= (date-day d1) (date-day d2))
+         (= (date-month d1) (date-month d2))
+         (= (date-year d1) (date-year d2))))
 
   (define isodate-fmt "~Y-~m-~d")
 
@@ -136,25 +152,61 @@
 
   (define (parse-date s)
     (cond ((string=? s "today")
-           (current-date 0))
+           (todays-date 0))
           (else
            (guard (c (#t #f))
              (date-with-zone-offset (string->date s isodate-fmt) 0)))))
 
-  (define (fold-days-between start-day end-day proc . seeds)
-    (let* ((start (date->time-utc start-day))
-           (end (add-duration (date->time-utc end-day) *one-day*)))
-      (receive (step time-cmp?)
-               (if (time<? start end)
-                   (values *one-day* time>=?)
-                   (values (time-* -1 *one-day*) time<=?))
-        (let loop ((cur start) (seeds seeds))
-          (if (time-cmp? cur end)
-              (apply values seeds)
-              (let ((cur-date (time-utc->date cur 0)))
-                (loop (add-duration cur step)
-                      (receive new-seeds (apply proc cur-date seeds) new-seeds))))))))
+  (define-syntax date-up-from
+    (syntax-rules ()
+      ((_ (date-var) (start-expr (to end-expr)) cont . env)
+       (cont
+        (((end) (date->time-utc end-expr)) ;Outer bindings
+         ((start tz) (let ((start start-expr))
+                       (values start (date-zone-offset start))))
+         ((step) one-day))
+        ((time-var (date->time-utc start)  ;Loop variables
+                   (add-duration time-var step)))
+        ()                                 ;Entry bindings
+        ((time>=? time-var end))           ;Termination conditions
+        (((date-var)                       ;Body bindings
+          (time-utc->date time-var tz)))
+        ()                                 ;Final bindings
+        . env))))
+  
+  (define-syntax date-down-from
+    (syntax-rules ()
+      ((_ (date-var) (start-expr (to end-expr)) cont . env)
+       (cont
+        (((end) (date->time-utc end-expr)) ;Outer bindings
+         ((start tz) (let ((start start-expr))
+                       (values start (date-zone-offset start))))
+         ((step) one-day))
+        ((time-var (date->time-utc start)  ;Loop variables
+                   (subtract-duration time-var step)))
+        ()                                 ;Entry bindings
+        ((time<=? time-var end))           ;Termination conditions
+        (((date-var)                       ;Body bindings
+          (time-utc->date time-var tz)))
+        ()                                 ;Final bindings
+        . env))))
 
+  (define-syntax in-stream
+    (syntax-rules ()
+      ((_ (elt-var stream-var) (stream-expr) cont . env)
+       (cont
+        ()                                    ;Outer bindings
+        ((stream-var stream-expr              ;Loop variables
+                     (stream-cdr stream-var)))
+        ()                                    ;Entry bindings
+        ((stream-null? stream-var))           ;Termination conditions
+        (((elt-var) (stream-car stream-var))) ;Body bindings
+        ()                                    ;Final bindings
+        . env))
+      ;; Optional stream variable
+      ((_ (elt-var) (stream-expr) cont . env)
+       (in-stream (elt-var stream) (stream-expr) cont . env))))
+  
   (define (println fmt . args)
     (string-substitute #t fmt args 'braces)
     (newline))

@@ -25,11 +25,13 @@
 (library (irclogs parse)
   (export make-irc-log-entry
           irc-log-entry-date
+          irc-log-entry-count
           irc-log-entry-type
           irc-log-entry-nick
           irc-log-entry-message
           irc-log-entry-time-utc
-          irc-log-reader)
+          read-irc-log-entry
+          port->irc-log-entry-stream)
   (import (rnrs)
           (srfi :2 and-let*)
           (srfi :8 receive)
@@ -37,8 +39,12 @@
           (spells pathname)
           (spells misc)
           (spells match)
+          (spells gc)
+          (spells lazy)
+          (spells lazy-streams)
           (spells tracing)
-          (xitomatl irregex))
+          (xitomatl irregex)
+          (irclogs utils))
 
   (define special-sre '("[]\\`_^{|}"))
   (define nick-sre `(: (or alpha ,special-sre) (* (or alnum ,special-sre "-"))))
@@ -73,19 +79,19 @@
        )))
 
   (define-record-type irc-log-entry
-    (fields date type nick message))
+    (fields date count type nick message))
 
   (define (irc-log-entry-time-utc entry)
-    (date->time-utc (irc-log-entry-date entry)))
+    (and=> (irc-log-entry-date entry) date->time-utc))
 
   (define (date-with-h-m-s date h m s)
-    (make-date 0 s h m
+    (make-date 0 s m h
                (date-day date)
                (date-month date)
                (date-year date)
                (date-zone-offset date)))
   
-  (define (parse-line str date)
+  (define (parse-line str date count)
     (define (submatches match names)
       (map (lambda (name)
              (if (or (symbol? name) (integer? name))
@@ -100,19 +106,26 @@
                             (m (string->number minute))
                             (s (or (and=> second string->number) 0)))
                         (make-irc-log-entry (date-with-h-m-s date h m s)
+                                            count
                                             type
                                             nick
                                             message)))))
                 log-formats)
-        (make-irc-log-entry #f #f #f str)))
+        (make-irc-log-entry #f count #f #f str)))
 
-  (define (irc-log-reader date)
-    (lambda (port)
-      (let ((line (get-line port)))
-        (if (eof-object? line)
-            line
-            (parse-line line date))))))
+  (define (port->irc-log-entry-stream port date)
+    (lazy
+     (let recur ((count 0))
+       (let ((entry (read-irc-log-entry port date count)))
+         (if (eof-object? entry)
+             stream-nil
+             (stream-cons entry (recur (+ count 1))))))))
 
+  (define (read-irc-log-entry port date count)
+    (let ((line (get-line port)))
+      (if (eof-object? line)
+          line
+          (parse-line line date count)))))
 
 ;; Local Variables:
 ;; scheme-indent-styles: ((match-let 1))

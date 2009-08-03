@@ -132,7 +132,7 @@
                                (update-entry (cons `(year . ,year) vals) path lst))
                              entries))
             '()
-            (year-range (time-utc->date last-update 0) (current-date 0)))
+            (year-range (time-utc->date last-update 0) (todays-date 0)))
       (fold-log-tree log-dir (cons 'year tree-struct) update-entry '())))
 
 (define (year-range start-date end-date)
@@ -186,22 +186,21 @@
   (let ((changed-days (map car changed-logs)))
     (append (map (match-lambda
                   (((and (month day) key) changed-file)
-                   (cons key (log-file-status (mk-date year month day)
-                                              changed-file))))
+                   (cons key (log-file-status changed-file
+                                              (mk-date year month day)))))
                  changed-logs)
             (filter (lambda (entry)
                       (not (member (car entry) changed-days)))
                     state))))
 
-(define (log-file-status date path)
-  (let ((read-entry (irc-log-reader date)))
-    (call-with-input-file (x->namestring path)
-      (lambda (port)
-        (loop ((for entry (in-port port read-entry))
-               (with count 0 (if (member (irc-log-entry-type entry) '("<" "*"))
-                                 (+ count 1)
-                                 count)))
-          => `((message-count ,count)))))))
+(define (log-file-status path date)
+  (call-with-input-file (x->namestring path)
+    (lambda (port)
+      (loop ((for entry (in-stream (port->irc-log-entry-stream port date)))
+             (with count 0 (if (member (irc-log-entry-type entry) '("<" "*"))
+                               (+ count 1)
+                               count)))
+        => `((message-count ,count))))))
 
 (define parse-state-pathname
   (let ((rx (sre->irregex `(: (submatch-named year (+ digit)) "-"

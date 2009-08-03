@@ -1,6 +1,6 @@
 ;;; query.scm --- Unit tests for query string handling.
 
-;; Copyright (C) 2008 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -21,16 +21,19 @@
 
 ;;; Code:
 
+(define (minutes->duration m)
+  (make-time time-duration 0 (* m 60)))
+
 (define (q-dt q)
-  (let ((s (query->search q (mk-date 2008 12 5) 42)))
+  (let ((s (query->search q (mk-date 2008 12 5) 42 (minutes->duration 5))))
     (list (date->string (search-base-date s) "~1")
           (search-n-days s))))
 
 (define (q-m q)
-  (let ((s (query->search q (mk-date 2008 12 5) 42)))
+  (let ((s (query->search q (mk-date 2008 12 5) 42 (minutes->duration 5))))
     (lambda (str)
       ((search-matcher s)
-       (make-irc-log-entry 0 0 0 "" "dogbert" str)))))
+       (make-irc-log-entry (current-date) 0 "" "dogbert" str)))))
 
 (define (bool x)
   (if x #t #f))

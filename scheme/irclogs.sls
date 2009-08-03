@@ -33,7 +33,7 @@
           (srfi :2 and-let*)
           (srfi :8 receive)
           (only (srfi :13)
-                string-concatenate substring/shared)
+                string-concatenate substring/shared string-join)
           (srfi :43 vectors)
           (spells opt-args)
           (spells alist)
@@ -47,12 +47,14 @@
           (spells tracing)
           (spells irregex)
           (spells fmt)
+          (spells lazy-streams)
           (prometheus)
           (spenet path-dispatch)
           (xitomatl ssax extras)
           (spenet http)
           (spenet httpd responses)
           (spenet utils)
+          (irclogs window)
           (irclogs tree)
           (irclogs cache)
           (irclogs parse)
@@ -99,17 +101,10 @@
     `(div (^ (class "centered"))
           ,sxml))
 
-  (define (log-entry->shtml e count nick-entry-count anchor? wrap-time)
-    (define (timed-row class data)
-      `(tr (^ (class ,(if (= (mod nick-entry-count 2) 0) "even" "odd"))
-              ,@(if anchor?
-                    `((id ,(ssubst "e{0}" count)))
-                    '()))
-           (td (^ (class "time")) ,(wrap-time (date->string (irc-log-entry-date e) "~H:~M")
-                                              count))
-           (td (^ (class ,class)) ,@data)))
-    (define (nick-class)
-      (ssubst "n{0}" (mod (word->integer (irc-log-entry-nick e)) 26)))
+  (define (count->class count)
+    (if (= (mod count 2) 0) "even" "odd"))
+
+  (define (log-entry->shtml e row-class anchor? wrap-time)
     (let ((kind (cond ((irc-log-entry-type e)
                        => (lambda (type)
                             (cond ((string=? type "<") 'message)
@@ -117,38 +112,31 @@
                                   (else                'event))))
                       (else
                        'meta)))
-          (message (linkify (irc-log-entry-message e))))
+          (message (linkify (irc-log-entry-message e)))
+          (count (irc-log-entry-count e)))
+      (define (timed-row data-class data)
+        `(tr (^ (class ,row-class)
+                ,@(if anchor?
+                      `((id ,(ssubst "e{0}" count)))
+                      '()))
+             (td (^ (class "time")) ,(wrap-time (date->string (irc-log-entry-date e) "~H:~M")
+                                                count))
+             (td (^ (class ,data-class)) ,@data)))
+      (define (nick-class)
+        (ssubst "n{0}" (mod (word->integer (irc-log-entry-nick e)) 26)))
       (define (nick-row left right)
-        (values (+ nick-entry-count 1)
-                (timed-row (nick-class)
-                           (list left (irc-log-entry-nick e) right message))))
+        (timed-row (nick-class)
+                   (list left (irc-log-entry-nick e) right message)))
       (case kind
         ((message)
          (nick-row "<" ">"))
         ((action)
          (nick-row "*" " "))
         ((event)
-         (values nick-entry-count
-                 (timed-row "event" (list (irc-log-entry-type e) " "
-                                          (irc-log-entry-nick e) " " message))))
+         (timed-row "event" (list (irc-log-entry-type e) " "
+                                  (irc-log-entry-nick e) " " message)))
         (else
-         (values nick-entry-count
-                 `(tr (td (^ (class "meta") (colspan 2)) ,message)))))))
-
-  (define (filter-fold-log-file/shtml port date pred proc anchor? wrap-time . seeds)
-    (loop continue ((for entry (in-port port (irc-log-reader date)))
-                    (for count (up-from 0))
-                    (with nick-entry-count 0)
-                    (with seeds seeds))
-      => (apply values count seeds)
-      (if (pred entry)
-          (let*-values (((n-count shtml)
-                         (log-entry->shtml entry count nick-entry-count
-                                           anchor? wrap-time))
-                        (new-seeds (apply proc shtml seeds)))
-            (continue (=> nick-entry-count n-count)
-                      (=> seeds new-seeds)))
-          (continue))))
+         `(tr (td (^ (class "meta") (colspan 2)) ,message))))))
 
   (define (footer self)
     (center
@@ -215,7 +203,7 @@
               (else
                (loop (cons (cur-borders) borders) (cadr (vector-ref days i)) i (- i 1)))))))
 
-  (define (search-form base-url tag channel q c)
+  (define (search-form base-url tag channel q context)
     `(form (^ (id "search")
               (action ,(url-escape (ssubst "{0}{1}/{2}/" base-url tag channel) "/"))
               (accept-charset "utf-8"))
@@ -225,7 +213,7 @@
            " with "
            (input (^ (name "c") (title "Context in minutes")
                      (size 3) (maxlength 10)
-                     ,@(if c `((value ,c)) '())))
+                     ,@(if context `((value ,(/ (time-second context) 60))) '())))
            " minutes of context"
            (br)
            (input (^ (type "submit") (name "search-btn") (value "Search")))))
@@ -245,34 +233,6 @@
                                ,@(make-list n-empty '(td))))
                          markup)
                         (+ i n-columns))))))))
-
-  (define (search-log self oport tag channel date search)
-    (let ((day-url (day-url (self 'base-url) tag channel date)))
-      (define (render-hit shtml first?)
-        (when first?
-          (sxml->xml
-           `(tr (th (^ (colspan 2))
-                    (a (^ (href ,day-url)) ,(unparse-date date))))
-           oport))
-        (sxml->xml shtml oport)
-        #f)
-      (or
-        (and-let* ((log-port (self 'open-log-file tag channel date)))
-          (call-with-port log-port
-            (lambda (log-port)
-              (receive (msg-count first?)
-                       (filter-fold-log-file/shtml
-                        log-port
-                        date
-                        (search-matcher search)
-                        render-hit
-                        #f ;; no anchors
-                        (lambda (time count)
-                          `(a (^ (href ,(ssubst "{0}#e{1}" day-url count)))
-                              ,time))
-                        #t)
-                msg-count))))
-        0)))
 
   (define render-log-js
     "$(document).ready(function() { activate_log_options(); });")
@@ -375,10 +335,14 @@
   (define (fill-day-vector! vec days year days-alist)
     (do ((alist days-alist (cdr alist)))
         ((null? alist) vec)
-      (let ((index (vector-binary-search days (cons year (caar alist)) (list-comparator > =))))
-        (unless index
-          (error 'fill-day-vector! "out-of-range date encountered" (car alist) days))
-        (vector-set! vec index (cdar alist)))))
+      (let ((key (cons year (caar alist))))
+        (cond ((vector-binary-search days key (list-comparator > =))
+               => (lambda (index)
+                    (vector-set! vec index (cdar alist))))
+              (else
+               (error 'fill-day-vector!
+                      "out-of-range date encountered"
+                      key days))))))
 
   (define (list-comparator less? equiv?)
     (lambda (l1 l2)
@@ -410,14 +374,18 @@
                          (drop entry 3))))
                 state))
 
+  ;; Returns a list of (<year> <month> <day>) lists, in descending
+  ;; order, starting at `start-day' and ending on `end-day' (both
+  ;; inclusive).
   (define (days-between start-day end-day)
     (define (day->date day)
       (make-date 0 0 0 0 (caddr day) (cadr day) (car day) 0))
-    (fold-days-between (day->date start-day) (day->date end-day)
-                       (lambda (date days)
-                         (cons (list (date-year date) (date-month date) (date-day date))
-                               days))
-                       '()))
+    (define (date->day date)
+      (list (date-year date) (date-month date) (date-day date)))
+    (loop ((for date (date-up-from (day->date start-day)
+                                   (to (date+days (day->date end-day) 1))))
+           (for result (listing-reverse (date->day date))))
+      => result))
 
   (define (query-date query)
     (let ((val (assq-ref query 'date)))
@@ -446,15 +414,6 @@
 
   (define *irclogs* (*the-root-object* 'clone))
 
-  (define-values (irclogs-dispatcher irclogs-path)
-    (path-dispatch-rules
-     (((path-arg/string*) (path-arg/string*))
-      render-overview)
-     (((path-arg/string) (path-arg/string) (path-arg/iso-date))
-      render-log)
-     (else
-      #f)))
-  
   (define (make-irclogs options)
     (let ((logs (*irclogs* 'clone)))
       (for-each (lambda (entry)
@@ -500,14 +459,15 @@
 
   (define (render-overview self request tag channel)
     (let* ((query (http-request/uri-query-alist request))
-           (base-date (or (query-date query) (current-date 0)))
-           (context (or (and=> (assq-ref query 'c) string->number) 5))
+           (base-date (or (query-date query) (todays-date 0)))
+           (c (or (and=> (assq-ref query 'c) string->number) 5))
            (n-days (cond ((and tag channel) 365)
                          (else                7))))
       (cond
        ((and tag channel (assq-ref query 'q))
         => (lambda (q)
-             (render-search-task self tag channel base-date q context)))
+             (render-search self tag channel
+                            base-date q (make-time time-duration 0 (* c 60)))))
        (else
         (let ((state (cache-get (self %cache) tag channel base-date n-days)))
           (receive (days rows)
@@ -555,7 +515,9 @@
           (base-url (self 'base-url)))
       `((meta (title ,(ssubst "IRC activity for {0}/{1}" tag channel)))
         (h1 ,(breadcrumbs base-url tag channel #f))
-        ,(search-form base-url tag channel #f (self 'default-context))
+        ,(search-form base-url tag channel #f (make-time time-duration
+                                                         0
+                                                         (* 60 (self 'default-context))))
         ,(activity-nav-links self tag channel
                              (apply mk-date (vector-ref days 0))
                              (vector-length days)
@@ -571,8 +533,13 @@
            (days-month-borders days)))))
 
   (define (render-log self request tag channel date)
-    (let ((base-url (self 'base-url)))
-      (and-let* ((log-port (self 'open-log-file tag channel date)))
+    (let ((base-url (self 'base-url))
+          (entries (self 'open-log-stream tag channel date)))
+      (define (wrap-time time count)
+        `(a (^ (href ,(ssubst "#e{0}" count)))
+            ,time))
+      (and
+        entries
         `((meta (title
                  ,(ssubst "IRC log for {0}/{1} {2}" tag channel date))
                 (js-include "jquery.js")
@@ -588,36 +555,28 @@
                 (input (^ (type "submit") (name "opt-btn") (value "Apply"))))
           ,(center
             `(table (^ (class "log"))
-                    ,(lambda (oport)
-                       (call-with-port log-port
-                         (lambda (log-port)
-                           (filter-fold-log-file/shtml
-                            log-port
-                            date
-                            (lambda (entry) #t)
-                            (lambda (shtml)
-                              (sxml->xml shtml oport)
-                              (values))
-                            #t
-                            (lambda (time count)
-                              `(a (^ (href ,(ssubst "#e{0}" count)))
-                                  ,time))))))))
+                    ,(lambda (port)
+                       (loop ((for entry (in-stream entries))
+                              (for count (up-from 0)))
+                         (sxml->xml
+                          (log-entry->shtml entry (count->class count) #t wrap-time)
+                          port)))))
           ,(footer self)))))
 
   (define-method (*irclogs* 'update-state self resend)
     (update-cache (self %cache)))
   
-  (define-method (*irclogs* 'open-log-file self resend tag channel date)
+  (define-method (*irclogs* 'open-log-stream self resend tag channel date)
     (and
       ;; guard against non-served channels
       ((self %matcher) `((tag . ,tag)
                          (channel . ,channel)
                          (year . ,(date-year date))))
-      (open-log-file (self 'log-dir)
-                     (cons 'year (self 'dir-struct))
-                     tag channel date)))
+      (open-log-stream (self 'log-dir)
+                       (cons 'year (self 'dir-struct))
+                       tag channel date)))
 
-  (define (render-search-task self tag channel base-date q context)
+  (define (render-search self tag channel base-date q context)
     (let ((search (query->search q base-date (self 'search-n-days) context)))
       `((meta (title ,(ssubst "Search {0}/{1}" tag channel)))
         (h1 ,(breadcrumbs (self 'base-url) tag channel #f #t))
@@ -640,10 +599,10 @@
                                                  day-count msg-count (timer)
                                                  (redate-search search date)))))
                       (receive (day-count msg-count)
-                               (day-range-search-task self port
-                                                      tag channel search
-                                                      escaper
-                                                      yield)
+                               (search-day-range self port
+                                                 tag channel search
+                                                 escaper
+                                                 yield)
                         (render-search-footer self tag channel
                                               day-count msg-count (timer) #f)))))))))
         (task-result)
@@ -666,18 +625,61 @@
                       "Continue search"))
                  '()))))
 
-  (define (day-range-search-task self port tag channel search escaper yield)
+  (define (search-day-range self port tag channel search escaper yield)
     (let ((base-url (self 'base-url)))
-      (fold-days-between
-       (date+days (search-base-date search) 1) ;; from base-date at 24:00
-       (date+days (search-base-date search)
-                  (- (search-n-days search)))  ;; back to (- base-date n-days) at 0:00
-       (lambda (date day-count msg-count)
-         (let ((day-msg-count (search-log self port tag channel date search)))
-           (escaper date day-count msg-count)
-           (yield #t)
-           (values (+ day-count 1) (+ msg-count day-msg-count))))
-       0 0)))
+      (loop next-date
+          ((for date (date-down-from
+                      (search-base-date search)
+                      (to (date+days (search-base-date search)
+                                     (- (search-n-days search))))))
+           (for day-count (up-from 0))
+           (with window (make-search-window (search-context search)
+                                            (search-matcher search)))
+           (with msg-count 0)
+           (with last-date #f))
+        => (values day-count msg-count)
+        (let ((entry-url
+               (lambda (entry)
+                 (url-string base-url
+                             (list render-log tag channel (irc-log-entry-date entry))
+                             "/#e{0}" (irc-log-entry-count entry))))
+              (day-url (url-string base-url (list render-log tag channel date) "/"))
+              (log-stream (or (self 'open-log-stream tag channel date)
+                              stream-nil)))
+          (escaper date day-count msg-count)
+          (yield #t)
+          (loop ((for hit new-window count (in-search-hits window log-stream))
+                 (with last-hit-date last-date (search-hit-last-date hit)))
+            => (next-date (=> window new-window)
+                          (=> msg-count (+ msg-count count))
+                          (=> last-date last-hit-date))
+            (let ((hit-first-date (search-hit-first-date hit)))
+              ;; Show header line with date, if we moved to another day
+              (when (or (not last-hit-date)
+                        (not (date-day=? last-hit-date hit-first-date)))
+                (sxml->xml
+                 `(tr (th (^ (colspan 2))
+                          (a (^ (href ,day-url)) ,(unparse-date hit-first-date))))
+                 port))
+              (render-search-hit port hit count last-date entry-url)
+              (sxml->xml `(tr (^ (class "sep")) (td (^ (colspan 2)) (hr)))
+                         port)))))))
+
+  (define (render-search-hit port hit after-count last-date entry-url)
+    (let ((hit-idx (search-hit-index hit)))
+      (loop continue
+          ((for entry i (in-vector (search-hit-entries hit)))
+           (for count (up-from 0))
+           (with last-date last-date (irc-log-entry-date entry)))
+        (sxml->xml
+         (log-entry->shtml entry
+                           (if (= hit-idx i) "hit" (count->class count))
+                           #f
+                           (lambda (time count)
+                             `(a (^ (href ,(entry-url entry)))
+                                 ,time)))
+         port)
+        (continue))))
 
   (define (activity-nav-links self tag channel base-date n-days-shown step)
     (let ((next-date (date+days base-date step))
@@ -703,6 +705,24 @@
             ,(date-link next-date "<<")
             ,(date-link prev-date ">>"))))
 
+  (define-values (irclogs-dispatcher irclogs-path)
+    (path-dispatch-rules
+     (((path-arg/string*) (path-arg/string*))
+      render-overview)
+     (((path-arg/string) (path-arg/string) (path-arg/iso-date))
+      render-log)
+     (else
+      #f)))
+
+  (define (url-string base renderer+args suffix-fmt . args)
+    (let ((path (apply irclogs-path renderer+args)))
+      (string-append base
+                     (string-join (map (lambda (elt)
+                                         (url-escape elt ""))
+                                       path)
+                                  "/")
+                     (string-substitute suffix-fmt args))))
+  
   (*irclogs* 'add-value-slot! 'log-dir %set-log-dir! (make-pathname #f '() #f))
   (*irclogs* 'add-value-slot! 'state-dir %set-state-dir! (make-pathname #f '() #f))
   (*irclogs* 'add-value-slot! 'dir-struct %set-dir-struct!

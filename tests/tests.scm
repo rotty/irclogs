@@ -25,13 +25,20 @@
 
 ((systems irclogs)
  (files
-  ("utils.scm"
-   (srfi :8 receive)
-   (only (spells assert) cout)
-   (irclogs utils))
   ("query.scm"
    (srfi :8 receive)
    (srfi :19 time)
    (irclogs utils)
    (irclogs parse)
-   (irclogs query))))
+   (irclogs query))
+  ((code
+    (set-test-debug-errors?! #t))
+   "window.scm"
+   (srfi :8 receive)
+   (srfi :19 time)
+   (spells misc)
+   (spells match)
+   (spells foof-loop)
+   (irclogs parse)
+   (irclogs window))))
+

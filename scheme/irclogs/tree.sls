@@ -24,7 +24,8 @@
 
 (library (irclogs tree)
   (export fold-log-tree
-          open-log-file)
+          open-log-file
+          open-log-stream)
   (import (except (rnrs) delete-file file-exists?)
           (only (srfi :1) concatenate split-at)
           (srfi :2 and-let*)
@@ -33,11 +34,16 @@
           (srfi :19 time)
           (spells alist)
           (spells misc)
+          (spells lazy)
+          (spells lazy-streams)
+          (spells gc)
           (spells filesys)
           (spells irregex)
           (spells pathname)
           (spells gzip)
-          (irclogs utils))
+          (spells tracing)
+          (irclogs utils)
+          (irclogs parse))
 
 (define (fold-log-tree log-dir tree-struct proc . seeds)
   (define (file-combiner file-entry loc rxs placeholders . seeds)
@@ -110,6 +116,20 @@
                     (month . ,(num->str (date-month date) 2))
                     (day . ,(num->str (date-day date) 2)))
                   template))
+
+(define log-port-guardian (make-guardian))
+
+(define (open-log-stream log-dir tree-struct tag channel date)
+  ;; Close ports not in use anymore
+  (do ((port (log-port-guardian) (log-port-guardian)))
+      ((not port))
+    (close-port port))
+  (let ((port (open-log-file log-dir tree-struct tag channel date)))
+    (cond (port
+           (log-port-guardian port)
+           (port->irc-log-entry-stream port date))
+          (else
+           #f))))
 
 ;;; Utilities
 
