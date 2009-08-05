@@ -79,6 +79,10 @@ table.log th {
     font-size: larger;
 }
 
+table.log tr.hit {
+    font-weight: bold;
+}
+
 table.activity {
     border-collapse: collapse;
     border-width: thin;

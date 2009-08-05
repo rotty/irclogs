@@ -31,6 +31,7 @@
           search-hit-size
           search-hit-first-date
           search-hit-last-date
+          search-hit-matches
           in-search-hits)
   (import (rnrs)
           (srfi :8 receive)
@@ -47,13 +48,13 @@
 (define empty-tree (make-wt-tree time-wt-type))
 
 (define-record-type (search-window %make-search-window search-window?)
-  (fields context matcher counter hit-time entries))
+  (fields context matcher counter matches hit-time entries))
 
 (define (make-search-window context matcher)
-  (%make-search-window context matcher 0 #f empty-tree))
+  (%make-search-window context matcher 0 #f #f empty-tree))
 
 (define-record-type search-hit
-  (fields index entries))
+  (fields index matches entries))
 
 (define (search-hit-size hit)
   (vector-length (search-hit-entries hit)))
@@ -71,6 +72,7 @@
     (and hit-time
          (make-search-hit
           (wt-tree/rank entries hit-time)
+          (search-window-matches window)
           (let ((vec (make-vector (wt-tree/size entries))))
             (wt-tree/fold (lambda (time entry i)
                             (vector-set! vec i entry)
@@ -97,25 +99,28 @@
         (context (search-window-context window))
         (matcher (search-window-matcher window))
         (counter (search-window-counter window))
+        (matches (search-window-matches window))
         (time (irc-log-entry-time-utc entry)))
-    (define (slide-window hit-time entry-time)
-      (values
-        (%make-search-window context
-                             matcher
-                             (+ counter 1)
-                             hit-time
-                             (wt-tree/add (wt-tree/split>
-                                           entries
-                                           (subtract-duration time context))
-                                          entry-time
-                                          entry))
-        #f))
-    (let ((hit? (matcher entry)))
+    (let ((new-matches (matcher entry)))
+      (define (slide-window hit-time entry-time)
+        (values
+          (%make-search-window
+           context
+           matcher
+           (+ counter 1)
+           (or new-matches matches)
+           hit-time
+           (wt-tree/add (wt-tree/split>
+                         entries
+                         (subtract-duration (or hit-time time) context))
+                        entry-time
+                        entry))
+          #f))
       (cond
         ((eqv? time #f)
          (values window #f))
         ((and hit-time
-              (or hit? (time>? (time-difference time hit-time) context)))
+              (or new-matches (time>? (time-difference time hit-time) context)))
          ;; Context exceeded; returns a new window with `entry' being
          ;; the (only) initial entry, as well as a `search hit'
          ;; record corresponding to the old window
@@ -123,10 +128,11 @@
            (%make-search-window context
                                 matcher
                                 1
-                                (if hit? time #f)
+                                new-matches
+                                (if new-matches time #f)
                                 (wt-tree/add empty-tree time entry))
            (search-window->hit window)))
-        (hit?
+        (new-matches
          (let ((new-hit-time (uniquify-time time counter)))
            (slide-window new-hit-time new-hit-time)))
         (else

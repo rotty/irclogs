@@ -40,22 +40,36 @@
           match-expr-children
           match-expr-matcher
 
+          make-match
+          match-id
+          match-kind
+          match-start
+          match-end
+          match-with-start
+
           match-expr->shtml)
   (import (rnrs)
           (srfi :2 and-let*)
           (srfi :8 receive)
-          (only (srfi :1 lists) any unfold filter-map concatenate)
-          (only (srfi :13 strings) string-contains string-join)
+          (only (srfi :1 lists)
+                any append-reverse unfold filter-map concatenate)
+          (only (srfi :13 strings)
+                string-contains string-join)
           (srfi :19 time)
+          (only (spells record-types)
+                define-functional-fields)
           (spells irregex)
           (spells alist)
           (spells misc)
           (spells tracing)
           (spells match)
           (spells fmt)
+          (spells foof-loop)
           (irclogs parse)
           (irclogs utils))
 
+  ;;; Search
+  
   (define-record-type search
     (fields base-date n-days context match-expr))
 
@@ -74,9 +88,6 @@
                          (date->julian-day base-date)))))
                  (search-context search)
                  (search-match-expr search)))
-
-  (define-record-type match-expr
-    (fields id tag children matcher))
 
   (define (query->search q base-date n-days context)
     (let ((parts
@@ -121,6 +132,21 @@
           port)))
      ""))
 
+  
+  ;;; Match expressions, and matches
+  
+  (define-record-type match-expr
+    (fields id tag children matcher))
+
+  (define-record-type (:match make-match match?)
+    (fields (immutable kind match-kind)
+            (immutable id match-id)
+            (immutable start match-start)
+            (immutable end match-end)))
+
+  (define-functional-fields match
+    id kind start end)
+
   (define (match-expr->sexp me)
     (cond ((and (match-expr? me)
                 (match-expr-tag me))
@@ -163,6 +189,10 @@
                                (map match-expr-children and-subs))
                               other-subs))))
 
+  (define (sort-matches matches)
+    (list-sort (lambda (m1 m2) (< (match-start m1) (match-start m2)))
+               matches))
+  
   (define (and-match-expr children)
     (make-match-expr
      #f
@@ -170,28 +200,37 @@
      children
      (let ((submatchers (map match-expr-matcher children)))
        (lambda (entry)
-         (and-map (lambda (match)
-                    (match entry))
-                  submatchers)))))
+         (loop continue ((for matcher (in-list submatchers))
+                         (with matches '()))
+           => (sort-matches matches)
+           (and=> (matcher entry)
+                  (lambda (ms)
+                    (continue (=> matches (append-reverse ms matches))))))))))
 
   (define (msg-str-match-expr id s)
-    (and (string? s)
-         (make-match-expr
-          id
-          #f
-          (list s)
-          (lambda (entry)
-            (string-contains (irc-log-entry-message entry) s)))))
+    (make-match-expr
+     id
+     #f
+     (list s)
+     (lambda (entry)
+       (and=> (string-contains (irc-log-entry-message entry) s)
+              (lambda (idx)
+                (list (make-match 'msg id idx (+ idx (string-length s)))))))))
 
   (define (msg-rx-match-expr id x)
-    (guard (c (#t #f))
-      (let ((irx (irregex x)))
-        (make-match-expr
-         id
-         'rx
-         (list x)
-         (lambda (entry)
-           (irregex-search irx (irc-log-entry-message entry)))))))
+    (and-let* ((irx (guard (c (#t #f))
+                      (irregex x))))
+      (make-match-expr
+       id
+       'rx
+       (list x)
+       (lambda (entry)
+         (and=> (irregex-search irx (irc-log-entry-message entry))
+                (lambda (m)
+                  (list (make-match 'msg
+                                    id
+                                    (irregex-match-start-index m)
+                                    (irregex-match-end-index m)))))))))
 
   (define (nick-str-match-expr id x)
     (and-let* ((s (->str x)))
@@ -201,7 +240,8 @@
        (list x)
        (lambda (entry)
          (and-let* ((nick (irc-log-entry-nick entry)))
-           (string=? nick s))))))
+           (and (string=? nick s)
+                (list (make-match 'nick id 0 (string-length s)))))))))
 
   (define (->str x)
     (cond ((symbol? x) (symbol->string x))
@@ -240,5 +280,5 @@
   )
 
 ;; Local Variables:
-;; scheme-indent-styles: ((match 1))
+;; scheme-indent-styles: ((match 1) foof-loop)
 ;; End:

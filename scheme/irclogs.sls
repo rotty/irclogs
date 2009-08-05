@@ -37,6 +37,7 @@
           (srfi :43 vectors)
           (spells opt-args)
           (spells alist)
+          (spells match)
           (spells misc)
           (spells time-lib)
           (spells pathname)
@@ -79,22 +80,25 @@
 
   (define link-rx (irregex "\\b[a-z]+://[^\\s<>]+"))
 
-  (define (linkify str) ; str -> shtml
+  ;; Returns a list, whose elements are of the form (href <url> <url>)
+  ;; or (verb <str>), suitable for feeding into `highlight-matches'
+  ;; below.
+  (define (linkify str)
     (concatenate
      (reverse
       (irregex-fold link-rx
                     (lambda (i m markup)
                       (let ((url (irregex-match-substring m)))
-                        (cons (list (substring/shared
-                                     str
-                                     i
-                                     (irregex-match-start-index m 0))
-                                    `(a (^ (href ,url)) ,url))
+                        (cons `((verb ,(substring/shared
+                                        str
+                                        i
+                                        (irregex-match-start-index m 0)))
+                                (href ,url ,url))
                               markup)))
                     '()
                     str
                     (lambda (i markup)
-                      (cons (list (substring/shared str i (string-length str)))
+                      (cons `((verb ,(substring/shared str i (string-length str))))
                             markup))))))
 
   (define (center sxml)
@@ -104,7 +108,89 @@
   (define (count->class count)
     (if (= (mod count 2) 0) "even" "odd"))
 
-  (define (log-entry->shtml e row-class anchor? wrap-time)
+  (define (highlight-matches matches lst)
+    (loop continue ((for item (in-list lst))
+                    (with pos 0)
+                    (with matches matches)
+                    (with result '()))
+      => (reverse result)
+      (match item
+        ((tag s . tail)
+         (if (null? matches)
+             (reverse (cons (cons* tag (list s) tail) result))
+             (receive (highlighted matches-remaining)
+                      (highlight-string pos s matches)
+               (continue (=> pos (+ pos (string-length s)))
+                         (=> matches matches-remaining)
+                         (=> result (cons (cons* tag highlighted tail)
+                                          result)))))))))
+
+  (define (highlighted-item->shtml item)
+    (define (part->shtml part)
+      (match part
+        ((id . str) `(span (^ (class ,(ssubst "me-l{0}" (mod id 10)))) ,str))
+        (str str)))
+    (match item
+      (('verb parts)
+       (map part->shtml parts))
+      (('href parts url)
+       `((a (^ (href ,url)) ,@(map part->shtml parts))))))
+  
+  ;; Returns two values:
+  ;; 
+  ;; - A list of items, where each item is either a string, or a pair
+  ;;   with the match id as car, and the matched substring as cdr.
+  ;; - The remaining matches
+  (define (highlight-string s-start s matches)
+    (let* ((s-len (string-length s))
+           (s-end (+ s-start s-len)))
+      (loop continue ((for match match-pair (in-list matches))
+                      (with pos s-start)
+                      (until (>= pos s-end))
+                      (with decorated '()))
+        => (values
+             (reverse (if (< pos s-end)
+                          (cons (substring s (- pos s-start) (string-length s))
+                                decorated)
+                          decorated))
+             match-pair)
+        (let ((m-start (match-start match))
+              (m-end (match-end match)))
+          (define (cons-slice highlight? start end)
+            (let ((s-slice (substring s (- start s-start) (- end s-start))))
+              (cons (if highlight?
+                        (cons (match-id match) s-slice)
+                        s-slice)
+                    decorated)))
+          (cond ((<= s-end m-start)
+                 (continue (=> pos s-end)
+                           (=> decorated (cons-slice #f pos s-end))))
+                ((< pos m-start)
+                 (continue (=> pos m-start)
+                           (=> decorated (cons-slice #f pos m-start))
+                           (=> match-pair match-pair)))
+                ((< s-end m-end)
+                 ;; split match
+                 (continue (=> pos s-end)
+                           (=> match-pair (cons (match-with-start match s-end)
+                                                (cdr match-pair)))
+                           (=> decorated (cons-slice #t pos s-end))))
+                ((= s-end m-end)
+                 (continue (=> pos s-end)
+                           (=> decorated (cons-slice #t pos s-end))))
+                (else ; (> s-end m-end)
+                 (continue (=> pos m-end)
+                           (=> decorated (cons-slice #t pos m-end)))))))))
+
+  (define (beautify matches msg)
+    (map highlighted-item->shtml
+         (highlight-matches matches (linkify msg))))
+
+  (define (filter-matches kind matches)
+    (filter (lambda (m) (eq? kind (match-kind m)))
+            matches))
+  
+  (define (log-entry->shtml e matches row-class anchor? wrap-time)
     (let ((kind (cond ((irc-log-entry-type e)
                        => (lambda (type)
                             (cond ((string=? type "<") 'message)
@@ -112,31 +198,36 @@
                                   (else                'event))))
                       (else
                        'meta)))
-          (message (linkify (irc-log-entry-message e)))
+          (nick (and=> (irc-log-entry-nick e)
+                       (lambda (nick)
+                         (map highlighted-item->shtml
+                              (highlight-matches (filter-matches 'nick matches)
+                                                 `((verb ,nick)))))))
+          (message (beautify (filter-matches 'msg matches)
+                             (irc-log-entry-message e)))
           (count (irc-log-entry-count e)))
       (define (timed-row data-class data)
         `(tr (^ (class ,row-class)
                 ,@(if anchor?
                       `((id ,(ssubst "e{0}" count)))
                       '()))
-             (td (^ (class "time")) ,(wrap-time (date->string (irc-log-entry-date e) "~H:~M")
-                                                count))
+             (td (^ (class "time"))
+                 ,(wrap-time (date->string (irc-log-entry-date e) "~H:~M")
+                             count))
              (td (^ (class ,data-class)) ,@data)))
       (define (nick-class)
         (ssubst "n{0}" (mod (word->integer (irc-log-entry-nick e)) 26)))
       (define (nick-row left right)
-        (timed-row (nick-class)
-                   (list left (irc-log-entry-nick e) right message)))
+        (timed-row (nick-class) (list left nick right message)))
       (case kind
         ((message)
          (nick-row "<" ">"))
         ((action)
          (nick-row "*" " "))
         ((event)
-         (timed-row "event" (list (irc-log-entry-type e) " "
-                                  (irc-log-entry-nick e) " " message)))
+         (timed-row "event" `(,(irc-log-entry-type e) " " ,@nick " " ,@message)))
         (else
-         `(tr (td (^ (class "meta") (colspan 2)) ,message))))))
+         `(tr (td (^ (class "meta") (colspan 2)) ,@message))))))
 
   (define (footer self)
     (center
@@ -559,7 +650,7 @@
                        (loop ((for entry (in-stream entries))
                               (for count (up-from 0)))
                          (sxml->xml
-                          (log-entry->shtml entry (count->class count) #t wrap-time)
+                          (log-entry->shtml entry '() (count->class count) #t wrap-time)
                           port)))))
           ,(footer self)))))
 
@@ -670,15 +761,17 @@
       (loop continue
           ((for entry i (in-vector (search-hit-entries hit)))
            (for count (up-from 0))
-           (with last-date last-date (irc-log-entry-date entry)))
-        (sxml->xml
-         (log-entry->shtml entry
-                           (if (= hit-idx i) "hit" (count->class count))
-                           #f
-                           (lambda (time count)
-                             `(a (^ (href ,(entry-url entry)))
-                                 ,time)))
-         port)
+           (with last-date last-date (irc-log-entry-date entry)))1
+        (let ((match? (= hit-idx i)))
+          (sxml->xml
+           (log-entry->shtml entry
+                             (if match? (search-hit-matches hit) '())
+                             (if match? "hit" (count->class count))
+                             #f
+                             (lambda (time count)
+                               `(a (^ (href ,(entry-url entry)))
+                                   ,time)))
+           port))
         (continue))))
 
   (define (activity-nav-links self tag channel base-date n-days-shown step)
@@ -739,5 +832,5 @@
   )
 
 ;; Local Variables:
-;; scheme-indent-styles: ((modify-object! 1) foof-loop)
+;; scheme-indent-styles: ((modify-object! 1) foof-loop (match 1))
 ;; End:

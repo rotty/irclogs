@@ -32,6 +32,7 @@
   (import (rnrs)
           (only (srfi :1) filter-map iota)
           (only (srfi :13) string-concatenate)
+          (spells alist)
           (spells match)
           (spells string-utils)
           (xitomatl ssax extras)
@@ -118,7 +119,7 @@
                     (map
                      (lambda (x)
                        (string-substitute ".me-l<0> { background: #<1> }\n"
-                                          (list x (integer->color x))
+                                          (list x (integer->neon-color x))
                                           'abrackets))
                      (iota 10)))))
           )
@@ -135,14 +136,37 @@
       '()
       (cons (mod num base) (integer->bits (div num base) base))))
 
-(define colors '("e" "c" "a"))
+;; int -> str
+(define integer->color
+  (case-lambda
+    ((num colors)
+     (let ((nb (append (integer->bits num 3) '(0 0 0))))
+       (string-append
+        (list-ref colors (list-ref nb 0))
+        (list-ref colors (list-ref nb 1))
+        (list-ref colors (list-ref nb 2)))))
+    ((num)
+     (integer->color num '("e" "c" "a")))))
 
-(define (integer->color num) ; int -> str
-  (let ((nb (append (integer->bits num 3) '(0 0 0))))
-    (string-append
-     (list-ref colors (list-ref nb 0))
-     (list-ref colors (list-ref nb 1))
-     (list-ref colors (list-ref nb 2)))))
+(define hex-digit
+  (let ((digits (list->vector (string->list "0123456789abcdef"))))
+    (lambda (i)
+      (vector-ref digits i))))
+
+(define (integer->neon-color n)
+  (let* ((primary (list-ref '(r g) (bitwise-bit-field n 0 1)))
+         (potential-secondaries (remq primary '(r g b)))
+         (secondary (list-ref potential-secondaries
+                              (bitwise-bit-field n 1 2)))
+         (secondary-value (list-ref '(15 11 7) (mod (bitwise-bit-field n 0 4) 3)))
+         (colors (list (cons primary #xf)
+                       (cons secondary secondary-value)
+                       (cons (car (remq secondary potential-secondaries))
+                             0))))
+    (apply string-append
+           (map (lambda (c)
+                  (string (hex-digit (assq-ref colors c))))
+                '(r g b)))))
 
 )
 
