@@ -523,9 +523,11 @@
                     (else
                      (error 'make-irclogs "unknown option" entry))))
                 options)
+      (logs 'add-value-slot! 'log-tree (make-log-tree
+                                        (logs 'log-dir)
+                                        (cons 'year (logs 'dir-struct))))
       (logs 'add-value-slot! %cache (make-cache (logs 'state-dir)
-                                                (logs 'log-dir)
-                                                (logs 'dir-struct)
+                                                (logs 'log-tree)
                                                 (logs %matcher)))
       (modify-object! logs
         ((dispatch self resend path request)
@@ -666,9 +668,7 @@
       ((self %matcher) `((tag . ,tag)
                          (channel . ,channel)
                          (year . ,(date-year date))))
-      (open-log-stream (self 'log-dir)
-                       (cons 'year (self 'dir-struct))
-                       tag channel date)))
+      (open-log-stream (self 'log-tree) tag channel date)))
 
   (define (render-search self tag channel base-date q context)
     (let ((search (query->search q base-date (self 'search-n-days) context)))

@@ -23,8 +23,8 @@
 #!r6rs
 
 (library (irclogs tree)
-  (export fold-log-tree
-          open-log-file
+  (export make-log-tree
+          fold-log-tree
           open-log-stream)
   (import (except (rnrs) delete-file file-exists?)
           (only (srfi :1) concatenate split-at)
@@ -45,7 +45,10 @@
           (irclogs utils)
           (irclogs parse))
 
-(define (fold-log-tree log-dir tree-struct proc . seeds)
+(define-record-type log-tree
+  (fields dir struct))
+
+(define (fold-log-tree tree restrictions proc . seeds)
   (define (file-combiner file-entry loc rxs placeholders . seeds)
     (let ((without-gz (pathname-strip-file-type file-entry "gz")))
       (cond ((and-let* (((null? (cdr rxs)))
@@ -66,38 +69,42 @@
                       (apply values #t loc rxs placeholders new-seeds)))))
             (else
              (apply values #t loc rxs placeholders seeds)))))
-  (let ((log-tree-rxs (map construct-rx tree-struct))
-        (placeholders (map extract-placeholders tree-struct)))
+  (define (dir-combiner dir-entry loc rxs placeholders . seeds)
+    (cond ((and (not (null? (cdr rxs)))
+                (irregex-match (car rxs) (file-namestring dir-entry)))
+           => (lambda (match)
+                (apply values
+                       #t
+                       #t
+                       (lambda (old-loc old-rxs old-placeholders . new-seeds)
+                         (apply values #t loc rxs placeholders new-seeds))
+                       (cons (irregex-submatch-alist match
+                                                     (car placeholders))
+                             loc)
+                       (cdr rxs)
+                       (cdr placeholders)
+                       seeds)))
+          (else
+           (apply values #t #f #f loc rxs placeholders seeds))))
+  (let* ((struct (log-tree-struct tree))
+         (log-tree-rxs (map (lambda (part)
+                              (construct-rx part restrictions))
+                            struct))
+         (placeholders (map extract-placeholders (log-tree-struct tree))))
     (receive (loc rxs placeholders . seeds)
              (apply
               directory-fold-tree*
-              log-dir
+              (log-tree-dir tree)
               file-combiner
-              (lambda (dir-entry loc rxs placeholders . seeds)
-                (cond ((and (not (null? (cdr rxs)))
-                            (irregex-match (car rxs) (file-namestring dir-entry)))
-                       => (lambda (match)
-                            (apply values
-                                   #t
-                                   #t
-                                   (lambda (old-loc old-rxs old-placeholders . new-seeds)
-                                     (apply values #t loc rxs placeholders new-seeds))
-                                   (cons (irregex-submatch-alist match
-                                                                 (car placeholders))
-                                         loc)
-                                   (cdr rxs)
-                                   (cdr placeholders)
-                                   seeds)))
-                      (else
-                       (apply values #t #f #f loc rxs placeholders seeds))))
+              dir-combiner
               '()
               log-tree-rxs
               placeholders
               seeds)
       (apply values seeds))))
 
-(define (open-log-file log-dir tree-struct tag channel date)
-  (let ((path (log-path log-dir tree-struct tag channel date)))
+(define (open-log-file tree tag channel date)
+  (let ((path (log-path tree tag channel date)))
     (or (and (file-exists? path)
              (file-readable? path)
              (transcoded-port (open-file-input-port (x->namestring path))
@@ -108,23 +115,23 @@
           (transcoded-port (open-gz-file-input-port path-gz)
                            (native-transcoder))))))
 
-(define (log-path log-dir template tag channel date)
-  (vals->pathname log-dir
+(define (log-path tree tag channel date)
+  (vals->pathname (log-tree-dir tree)
                   `((tag . ,tag)
                     (channel . ,channel)
                     (year . ,(num->str (date-year date) 4))
                     (month . ,(num->str (date-month date) 2))
                     (day . ,(num->str (date-day date) 2)))
-                  template))
+                  (log-tree-struct tree)))
 
 (define log-port-guardian (make-guardian))
 
-(define (open-log-stream log-dir tree-struct tag channel date)
+(define (open-log-stream tree tag channel date)
   ;; Close ports not in use anymore
   (do ((port (log-port-guardian) (log-port-guardian)))
       ((not port))
     (close-port port))
-  (let ((port (open-log-file log-dir tree-struct tag channel date)))
+  (let ((port (open-log-file tree tag channel date)))
     (cond (port
            (log-port-guardian port)
            (port->irc-log-entry-stream port date))
@@ -140,11 +147,13 @@
     (tag . ,ident-sre)
     (channel . (: (+ "#") ,ident-sre))))
 
-(define (construct-rx part)
+(define (construct-rx part restrictions)
   (define (->sre x)
     (cond ((symbol? x)
-           `(submatch-named ,x ,(or (assq-ref sre-alist x)
-                                    (error 'construct-rx "unknown shorthand" x))))
+           `(submatch-named ,x
+                            ,(or (assq-ref restrictions x)
+                                 (assq-ref sre-alist x)
+                                 (error 'construct-rx "unknown shorthand" x))))
           (else x)))
   (if (pair? part)
       (sre->irregex (cons ': (map ->sre part)))

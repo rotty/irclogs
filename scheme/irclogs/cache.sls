@@ -44,44 +44,46 @@
           (spells filesys)
           (spells pathname)
           (spells string-utils)
+          (spells tracing)
           (irclogs parse)
           (irclogs tree)
           (irclogs utils))
 
 (define-record-type* cache
-  (make-cache cache-dir log-dir tree-struct fender)
-  ((last-update #f)))
+  (make-cache cache-dir tree fender)
+  ())
 
 (define-functional-fields cache
-  cache-dir log-dir tree-struct fender)
+  cache-dir tree fender)
 
 (define iso-date+time-fmt "~Y-~m-~d ~H:~M:~S ~z")
 
 (define (update-cache cache)
-  (receive (cache-dir log-dir tree-struct fender)
+  (receive (cache-dir tree fender)
            (cache-components cache)
     (let* ((update-file (pathname-with-file cache-dir "last-update"))
-           (last-update
-            (or (cache-last-update cache)
-                (read-time-utc update-file)))
+           (last-update (read-time-utc update-file))
           (now (current-date 0)))
       (create-directory* cache-dir)
       (for-each
        (match-lambda
-        (((year tag channel) . changed-logs)
+        (((year tag channel) . changed-days)
          (let ((state-file (state-file-pathname cache-dir year tag channel)))
            (println "{0} {1}/{2}: {3} days updated"
-                    year tag channel (length changed-logs))
+                    year tag channel (length changed-days))
            (call-with-output-file/atomic state-file
              (lambda (port)
                (write (update-state
                        (if (file-exists? state-file)
                            (call-with-input-file (x->namestring state-file) read)
                            '())
+                       tree
+                       tag
+                       channel
                        year
-                       changed-logs)
+                       changed-days)
                       port))))))
-       (log-tree-update-list log-dir tree-struct last-update fender))
+       (log-tree-update-list tree last-update fender))
       (call-with-output-file/atomic update-file
         (lambda (port)
           (write (date->string now iso-date+time-fmt) port))))))
@@ -100,45 +102,42 @@
 ;; Calculate the list of files that have changed since `last-update'
 ;; and need their state files be updated.
 ;; The returned list has the following structure:
-;; (((<year> <tag> <channel>) ((<month> <day>) <path>) ...) ...)
-(define (log-tree-update-list log-dir tree-struct last-update match?)
+;; (((<year> <tag> <channel>) (<month> <day>) ...) ...)
+(define (log-tree-update-list tree last-update match?)
   (define (update-entry vals path lst)
     (if (and (or (not match?)
                  (match? vals))
              (or (not last-update)
                  (time>? (file-modification-time path) last-update)))
-        (let ((key (list (assq-ref vals 'year)
+        (let ((key (list (string->number (assq-ref vals 'year))
                          (assq-ref vals 'tag)
                          (assq-ref vals 'channel)))
-              (month/day (list (and-let* ((m (assq-ref vals 'month)))
-                                 (string->number m))
-                               (and-let* ((d (assq-ref vals 'day)))
-                                 (string->number d)))))
+              (month/day (list (string->number (assq-ref vals 'month))
+                               (string->number (assq-ref vals 'day)))))
           (println "* {0} modified, adding to update list" (x->namestring path))
           (cond ((assoc key lst)
                  => (lambda (entry)
-                      (cons (cons key (cons (list month/day path) (cdr entry)))
+                      (cons (cons key (cons month/day (cdr entry)))
                             (filter (lambda (elt)
                                       (not (eq? elt entry)))
                                     lst))))
                 (else
-                 (cons (cons key (list (list month/day path))) lst))))
+                 (cons (cons key (list month/day)) lst))))
         lst))
-  (if last-update
-      (fold (lambda (year entries)
-              (fold-log-tree log-dir
-                             (cons (number->string year) tree-struct)
-                             (lambda (vals path lst)
-                               (update-entry (cons `(year . ,year) vals) path lst))
-                             entries))
-            '()
-            (year-range (time-utc->date last-update 0) (todays-date 0)))
-      (fold-log-tree log-dir (cons 'year tree-struct) update-entry '())))
+  (let ((restrictions
+         (if last-update
+             `((year . ,(year-range-sre (time-utc->date last-update 0)
+                                        (todays-date 0))))
+             '())))
+    (fold-log-tree tree
+                   restrictions
+                   update-entry
+                   '())))
 
-(define (year-range start-date end-date)
-  (let ((start-year (date-year start-date))
-        (end-year (date-year end-date)))
-    (iota (+ (- end-year start-year) 1) start-year)))
+(define (year-range-sre start-date end-date)
+  (loop ((for year (up-from (date-year start-date) (to (+ (date-year end-date) 1))))
+         (for result (listing (number->string year))))
+    => `(or ,@result)))
 
 (define (cache-get cache tag channel base-date n-days)
   (let* ((start-time (date+days->time-utc base-date (- n-days)))
@@ -182,25 +181,20 @@
            (create-directory* cache-dir)
            '()))))
 
-(define (update-state state year changed-logs)
-  (let ((changed-days (map car changed-logs)))
-    (append (map (match-lambda
-                  (((and (month day) key) changed-file)
-                   (cons key (log-file-status changed-file
-                                              (mk-date year month day)))))
-                 changed-logs)
-            (filter (lambda (entry)
-                      (not (member (car entry) changed-days)))
-                    state))))
-
-(define (log-file-status path date)
-  (call-with-input-file (x->namestring path)
-    (lambda (port)
-      (loop ((for entry (in-stream (port->irc-log-entry-stream port date)))
-             (with count 0 (if (member (irc-log-entry-type entry) '("<" "*"))
-                               (+ count 1)
-                               count)))
-        => `((message-count ,count))))))
+(define (update-state state tree tag channel year changed-days)
+  (define (log-status date)
+    (loop ((for entry (in-stream (open-log-stream tree tag channel date)))
+           (with count 0 (if (member (irc-log-entry-type entry) '("<" "*"))
+                             (+ count 1)
+                             count)))
+      => `((message-count ,count))))
+  (append (map (match-lambda
+                ((and (month day) m/d)
+                 (cons m/d (log-status (mk-date year month day)))))
+               changed-days)
+          (filter (lambda (entry)
+                    (not (member (car entry) changed-days)))
+                  state)))
 
 (define parse-state-pathname
   (let ((rx (sre->irregex `(: (submatch-named year (+ digit)) "-"
