@@ -98,8 +98,11 @@
                     '()
                     str
                     (lambda (i markup)
-                      (cons `((verb ,(substring/shared str i (string-length str))))
-                            markup))))))
+                      (let ((len (string-length str)))
+                        (if (< i len)
+                            (cons `((verb ,(substring/shared str i )))
+                                  markup)
+                            markup)))))))
 
   (define (center sxml)
     `(div (^ (class "centered"))
@@ -116,14 +119,12 @@
       => (reverse result)
       (match item
         ((tag s . tail)
-         (if (null? matches)
-             (reverse (cons (cons* tag (list s) tail) result))
-             (receive (highlighted matches-remaining)
-                      (highlight-string pos s matches)
-               (continue (=> pos (+ pos (string-length s)))
-                         (=> matches matches-remaining)
-                         (=> result (cons (cons* tag highlighted tail)
-                                          result)))))))))
+         (receive (highlighted matches-remaining)
+                  (highlight-string pos s matches)
+           (continue (=> pos (+ pos (string-length s)))
+                     (=> matches matches-remaining)
+                     (=> result (cons (cons* tag highlighted tail)
+                                      result))))))))
 
   (define (highlighted-item->shtml item)
     (define (part->shtml part)
@@ -568,7 +569,8 @@
                                                  state))
             (let ((n-rows (length rows)))
               (cond
-                ((= n-rows 0)
+                ((or (= n-rows 0)
+                     (= (vector-length days) 0))
                  #f)
                 ((and tag channel)
                  (assert (= n-rows 1))
@@ -580,7 +582,8 @@
     (let ((base-url (self 'base-url))
           (n-days (min 7 (vector-length days))))
       (and (> n-days 0)
-           `((meta (title ,(ssubst "IRC activity for {0} channels" tag)))
+           `((meta (title ,(ssubst "IRC activity for {0} channels"
+                                   (or tag "all"))))
              (h1 ,(breadcrumbs base-url tag channel #f))
              ,(activity-nav-links self tag channel base-date n-days 7)
              (table

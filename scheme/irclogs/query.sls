@@ -229,8 +229,8 @@
                 (lambda (m)
                   (list (make-match 'msg
                                     id
-                                    (irregex-match-start-index m)
-                                    (irregex-match-end-index m)))))))))
+                                    (irregex-match-start-index m 0)
+                                    (irregex-match-end-index m 0)))))))))
 
   (define (nick-str-match-expr id x)
     (and-let* ((s (->str x)))
