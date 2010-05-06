@@ -1,6 +1,6 @@
 ;;; utils.sls --- Utilities for the irclogs system.
 
-;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -35,8 +35,6 @@
     parse-date unparse-date
     todays-date
     date-day=?
-    date-up-from
-    date-down-from
 
     in-stream
     
@@ -64,18 +62,19 @@
           (srfi :8 receive)
           (srfi :13 strings)
           (srfi :14 char-sets)
+          (srfi :19 time)
           (srfi :26 cut)
           (srfi :39 parameters)
+          (wak riastreams)
+          (wak irregex)
           (spells opt-args)
           (spells alist)
-          (spells time-lib)
           (spells misc)
-          (spells lazy-streams)
           (spells string-utils)
           (spells pathname)
-          (spells irregex)
+          (spells time-lib)
           (spells tracing)
-          (spenet uri))
+          (ocelotl net uri))
 
   (define (list-intersperse lst item)
     (if (null? lst)
@@ -156,56 +155,6 @@
           (else
            (guard (c (#t #f))
              (date-with-zone-offset (string->date s isodate-fmt) 0)))))
-
-  (define-syntax date-up-from
-    (syntax-rules ()
-      ((_ (date-var) (start-expr (to end-expr)) cont . env)
-       (cont
-        (((end) (date->time-utc end-expr)) ;Outer bindings
-         ((start tz) (let ((start start-expr))
-                       (values start (date-zone-offset start))))
-         ((step) one-day))
-        ((time-var (date->time-utc start)  ;Loop variables
-                   (add-duration time-var step)))
-        ()                                 ;Entry bindings
-        ((time>=? time-var end))           ;Termination conditions
-        (((date-var)                       ;Body bindings
-          (time-utc->date time-var tz)))
-        ()                                 ;Final bindings
-        . env))))
-  
-  (define-syntax date-down-from
-    (syntax-rules ()
-      ((_ (date-var) (start-expr (to end-expr)) cont . env)
-       (cont
-        (((end) (date->time-utc end-expr)) ;Outer bindings
-         ((start tz) (let ((start start-expr))
-                       (values start (date-zone-offset start))))
-         ((step) one-day))
-        ((time-var (date->time-utc start)  ;Loop variables
-                   (subtract-duration time-var step)))
-        ()                                 ;Entry bindings
-        ((time<=? time-var end))           ;Termination conditions
-        (((date-var)                       ;Body bindings
-          (time-utc->date time-var tz)))
-        ()                                 ;Final bindings
-        . env))))
-
-  (define-syntax in-stream
-    (syntax-rules ()
-      ((_ (elt-var stream-var) (stream-expr) cont . env)
-       (cont
-        ()                                    ;Outer bindings
-        ((stream-var stream-expr              ;Loop variables
-                     (stream-cdr stream-var)))
-        ()                                    ;Entry bindings
-        ((stream-null? stream-var))           ;Termination conditions
-        (((elt-var) (stream-car stream-var))) ;Body bindings
-        ()                                    ;Final bindings
-        . env))
-      ;; Optional stream variable
-      ((_ (elt-var) (stream-expr) cont . env)
-       (in-stream (elt-var stream) (stream-expr) cont . env))))
   
   (define (println fmt . args)
     (string-substitute #t fmt args 'braces)

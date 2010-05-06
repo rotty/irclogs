@@ -1,6 +1,6 @@
 ;;; query.sls --- Query string handling.
 
-;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -58,13 +58,13 @@
           (srfi :19 time)
           (only (spells record-types)
                 define-functional-fields)
-          (spells irregex)
+          (wak irregex)
           (spells alist)
           (spells misc)
           (spells tracing)
           (spells match)
-          (spells fmt)
-          (spells foof-loop)
+          (wak fmt)
+          (wak foof-loop)
           (irclogs parse)
           (irclogs utils))
 

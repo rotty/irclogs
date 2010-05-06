@@ -1,6 +1,6 @@
 ;;; tests.scm --- List of unit-test files for running with testeez.
 
-;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -38,7 +38,7 @@
    (srfi :19 time)
    (spells misc)
    (spells match)
-   (spells foof-loop)
+   (wak foof-loop)
    (irclogs parse)
    (irclogs window))))
 

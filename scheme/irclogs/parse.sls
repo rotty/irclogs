@@ -1,6 +1,6 @@
 ;;; parse.sls --- Parse IRC logs
 
-;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008-2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -36,12 +36,12 @@
           (srfi :2 and-let*)
           (srfi :8 receive)
           (srfi :19 time)
+          (srfi :45 lazy)
           (spells pathname)
           (spells misc)
           (spells match)
           (spells gc)
-          (spells lazy)
-          (spells lazy-streams)
+          (wak riastreams)
           (spells tracing)
           (xitomatl irregex)
           (irclogs utils))

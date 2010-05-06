@@ -1,6 +1,6 @@
 ;;; irclogs.sls --- An interface to IRC logs
 
-;; Copyright (C) 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -34,6 +34,7 @@
           (srfi :8 receive)
           (only (srfi :13)
                 string-concatenate substring/shared string-join)
+          (srfi :19 time)
           (srfi :43 vectors)
           (spells opt-args)
           (spells alist)
@@ -44,17 +45,18 @@
           (spells filesys)
           (spells string-utils)
           (spells define-values)
-          (spells foof-loop)
+          (wak foof-loop)
           (spells tracing)
-          (spells irregex)
-          (spells fmt)
-          (spells lazy-streams)
-          (prometheus)
-          (spenet path-dispatch)
-          (xitomatl ssax extras)
-          (spenet http)
-          (spenet httpd responses)
-          (spenet utils)
+          (wak irregex)
+          (wak fmt)
+          (wak riastreams)
+          (wak prometheus)
+          (ocelotl ssax-utils)
+          (only (ocelotl private utils)
+                uri-with-directory-path) ;++ move that to (ocelotl net uri)
+          (ocelotl net path-dispatch)
+          (ocelotl net http)
+          (ocelotl net httpd responses)
           (irclogs window)
           (irclogs tree)
           (irclogs cache)
@@ -529,28 +531,29 @@
       (logs 'add-value-slot! %cache (make-cache (logs 'state-dir)
                                                 (logs 'log-tree)
                                                 (logs %matcher)))
-      (modify-object! logs
-        ((dispatch self resend path request)
-         (let* ((file-path? (not (or (null? path)
-                                     (string=? (last path) ""))))
-                (trimmed-path (trim-path path)))
-           (cond ((irclogs-dispatcher trimmed-path)
-                  => (lambda (renderer)
-                       (if file-path?
-                           (make-error-response
-                            (http-status moved-perm)
-                            request
-                            (uri-with-directory-path (http-request/uri request)))
-                           (or (and=> (renderer self request)
-                                      (lambda (shtml)
-                                        (shtml-response-page self
-                                                             request
-                                                             shtml)))
-                               (not-found-response-page self request)))))
-                 (else
-                  (not-found-response-page self request))))))
+      (logs 'add-method-slot! 'dispatch do-dispatch)
       logs))
 
+  (define (do-dispatch self resend path request)
+    (let* ((file-path? (not (or (null? path)
+                                (string=? (last path) ""))))
+           (trimmed-path (trim-path path)))
+      (cond ((irclogs-dispatcher trimmed-path)
+             => (lambda (renderer)
+                  (if file-path?
+                      (make-error-response
+                       (http-status moved-perm)
+                       request
+                       (uri-with-directory-path (http-request/uri request)))
+                      (or (and=> (renderer self request)
+                                 (lambda (shtml)
+                                   (shtml-response-page self
+                                                        request
+                                                        shtml)))
+                          (not-found-response-page self request)))))
+            (else
+             (not-found-response-page self request)))))
+  
   (define (render-overview self request tag channel)
     (let* ((query (http-request/uri-query-alist request))
            (base-date (or (query-date query) (todays-date 0)))

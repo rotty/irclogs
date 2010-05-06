@@ -1,6 +1,6 @@
 ;;; window.sls --- "sliding window" for searching with context
 
-;; Copyright (C) 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -36,10 +36,10 @@
   (import (rnrs)
           (srfi :8 receive)
           (srfi :19 time)
-          (spells foof-loop)
-          (spells lazy-streams)
+          (wak foof-loop)
+          (wak riastreams)
           (spells tracing)
-          (spenet wt-tree)
+          (ocelotl wt-tree)
           (irclogs utils)
           (irclogs parse))
 

@@ -1,6 +1,6 @@
 ;;; page.sls --- 
 
-;; Copyright (C) 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -35,9 +35,9 @@
           (spells alist)
           (spells match)
           (spells string-utils)
-          (xitomatl ssax extras)
-          (spenet http)
-          (spenet httpd responses))
+          (ocelotl ssax-utils)
+          (ocelotl net http)
+          (ocelotl net httpd responses))
 
 (define (shtml-response-page irclogs request shtml)
   (make-http-response

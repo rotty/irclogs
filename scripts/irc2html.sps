@@ -1,7 +1,7 @@
 #!/usr/bin/mzscheme -qr
 
 ;;  irc2html.scm - Convert IRC chat logs into valid HTML with valid CSS
-;;  Copyright 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;;  Copyright 2008, 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 ;;  Copyright 2003 MJ Ray <mjr@dsl.pipex.com>
 ;;  Please see the README file for this program for more information.
 ;;
@@ -24,21 +24,21 @@
         (rnrs r5rs)
         (srfi :2 and-let*)
         (srfi :8 receive)
+        (srfi :19 time)
         (only (srfi :1 lists) split-at)
         (only (srfi :13 strings)
               string-concatenate
               string-concatenate-reverse
               string-fold)
+        (wak irregex)
+        (wak fmt)
         (spells alist)
         (spells string-utils)
         (spells format)
-        (spells time-lib)
         (spells filesys)
         (spells pathname)
         (spells misc)
         (spells tracing)
-        (spells fmt)
-        (spells irregex)
         (irclogs utils))
 
 (define colors '("e" "c" "a"))

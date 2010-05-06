@@ -1,6 +1,6 @@
 ;;; cache.sls --- Handling the cache for the log files
 
-;; Copyright (C) 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -34,13 +34,13 @@
           (srfi :2 and-let*)
           (srfi :8 receive)
           (srfi :19 time)
+          (wak foof-loop)
+          (wak irregex)
           (spells alist)
-          (spells foof-loop)
           (spells match)
           (only (spells record-types)
                 define-record-type*
                 define-functional-fields)
-          (spells irregex)
           (spells filesys)
           (spells pathname)
           (spells string-utils)

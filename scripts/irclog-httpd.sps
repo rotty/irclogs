@@ -27,9 +27,9 @@
         (spells alist)
         (spells pathname)
         (spells string-utils)
-        (spenet soup-httpd)
-        (spenet httpd basic-handlers)
-        (spenet httpd file-directory-handlers)
+        (ocelotl net soup-httpd)
+        (ocelotl net httpd basic-handlers)
+        (ocelotl net httpd file-directory-handlers)
         (irclogs))
 
 (define (main argv)

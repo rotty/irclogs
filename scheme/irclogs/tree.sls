@@ -1,6 +1,6 @@
 ;;; tree.sls --- Handle a tree of IRC log files
 
-;; Copyright (C) 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2009, 2010 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -32,13 +32,13 @@
           (srfi :8 receive)
           (only (srfi :13) string-concatenate)
           (srfi :19 time)
+          (srfi :45 lazy)
           (spells alist)
           (spells misc)
-          (spells lazy)
-          (spells lazy-streams)
+          (wak riastreams)
           (spells gc)
           (spells filesys)
-          (spells irregex)
+          (wak irregex)
           (spells pathname)
           (spells gzip)
           (spells tracing)
@@ -124,16 +124,18 @@
                     (day . ,(num->str (date-day date) 2)))
                   (log-tree-struct tree)))
 
-(define log-port-guardian (make-guardian))
+(define log-port-reaper
+  (make-reaper (lambda (port)
+                 (close-port port)
+                 #t)))
 
 (define (open-log-stream tree tag channel date)
   ;; Close ports not in use anymore
-  (do ((port (log-port-guardian) (log-port-guardian)))
-      ((not port))
-    (close-port port))
+  (do ((v (log-port-reaper) (log-port-reaper)))
+      ((eqv? v #f)))
   (let ((port (open-log-file tree tag channel date)))
     (cond (port
-           (log-port-guardian port)
+           (log-port-reaper port)
            (port->irc-log-entry-stream port date))
           (else
            #f))))
