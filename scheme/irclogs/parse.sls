@@ -42,8 +42,8 @@
           (spells match)
           (spells gc)
           (wak riastreams)
+          (wak irregex)
           (spells tracing)
-          (xitomatl irregex)
           (irclogs utils))
 
   (define special-sre '("[]\\`_^{|}"))
