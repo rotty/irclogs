@@ -22,7 +22,7 @@
 ;;; Code:
 #!r6rs
 
-(library (irclogs)
+(library (irclogs webapp)
   (export make-irclogs)
   (import (except (rnrs) file-exists? delete-file
                   list->vector vector->list vector-fill! vector-for-each

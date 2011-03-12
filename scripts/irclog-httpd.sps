@@ -1,6 +1,6 @@
 ;;; irclog-httpd.sps -- HTTP Server providing an interface to IRC logs
 
-;; Copyright (C) 2008, 2009 Andreas Rottmann <a.rottmann@gmx.at>
+;; Copyright (C) 2008, 2009, 2011 Andreas Rottmann <a.rottmann@gmx.at>
 
 ;; Author: Andreas Rottmann <a.rottmann@gmx.at>
 
@@ -30,7 +30,7 @@
         (ocelotl net soup-httpd)
         (ocelotl net httpd basic-handlers)
         (ocelotl net httpd file-directory-handlers)
-        (irclogs))
+        (irclogs webapp))
 
 (define (main argv)
   (let ((config
