@@ -167,7 +167,8 @@
     (string-substitute port fmt args 'braces))
 
   (define scheme-impl-urls
-    '((ikarus . "http://www.cs.indiana.edu/~aghuloum/ikarus/")))
+    '((ikarus . "http://www.cs.indiana.edu/~aghuloum/ikarus/")
+      (mzscheme . "http://racket-lang.org/")))
 
   (define (host-impl-info-shtml)
     (let* ((impl (scheme-implementation))
