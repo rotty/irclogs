@@ -50,8 +50,8 @@ interface to a collection of IRC logs.
 * Instances
 
 Currently, there's an experimental instance of IRClogs running at
-[[http://rottyforge.yi.org/irclogs/]], serving a few select channels on
-the GNOME and freenode networks.
+[[http://rotty.yi.org/irclogs/]], serving a few select channels on the
+GNOME and freenode networks.
 
 * Documentation
 
