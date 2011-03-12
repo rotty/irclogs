@@ -24,9 +24,8 @@
 
 (library (irclogs webapp)
   (export make-irclogs)
-  (import (except (rnrs) file-exists? delete-file
-                  list->vector vector->list vector-fill! vector-for-each
-                  vector-map)
+  (import (except (rnrs)
+                  file-exists? delete-file)
           (only (srfi :1 lists)
                 append-map concatenate count drop
                 last make-list split-at)
@@ -35,7 +34,7 @@
           (only (srfi :13)
                 string-concatenate substring/shared string-join)
           (srfi :19 time)
-          (srfi :43 vectors)
+          (only (srfi :43 vectors) vector-binary-search)
           (spells opt-args)
           (spells alist)
           (spells match)
@@ -46,6 +45,7 @@
           (spells string-utils)
           (spells define-values)
           (wak foof-loop)
+          (wak foof-loop nested)
           (spells tracing)
           (wak irregex)
           (wak fmt)
@@ -595,10 +595,10 @@
               (^ (class "activity"))
               (thead
                (tr (th "Network") (th "Channel")
-                   ,@(map (lambda (date)
-                            (receive (year month day) (apply values date)
-                              `(th ,(ssubst "{0}-{1}" month day))))
-                          (vector->list days 0 n-days))))
+                   ,@(collect-list
+                         (for date (in-vector days 0 n-days))
+                       (receive (year month day) (apply values date)
+                         `(th ,(ssubst "{0}-{1}" month day))))))
               (tbody
                ,@(map (lambda (row)
                         (receive (tag channel) (apply values (car row))
