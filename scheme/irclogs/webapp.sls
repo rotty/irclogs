@@ -784,7 +784,7 @@
     (let ((next-date (date+days base-date step))
           (prev-date (date+days base-date (- n-days-shown)))
           (loc (string-concatenate (append (if tag (list tag "/") '())
-                                           (if channel (list channel "/"))))))
+                                           (if channel (list channel "/") '())))))
       (define (date-link date text)
         (let ((url (url-escape (ssubst "{0}{1}?date={2}" (self 'base-url) loc (unparse-date date))
                                "/?=")))
