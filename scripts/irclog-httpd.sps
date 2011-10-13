@@ -99,7 +99,7 @@
     (let ((app-handler
            (make-path-prefix-handler
             path-prefix
-            (lambda (path request)
+            (lambda (path request client)
               (irclogs 'dispatch path request))
             null-request-handler)))
       (if static-files
