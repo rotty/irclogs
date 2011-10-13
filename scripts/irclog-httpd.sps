@@ -27,6 +27,7 @@
         (spells alist)
         (spells pathname)
         (spells string-utils)
+        (spells logging)
         (ocelotl net soup-httpd)
         (ocelotl net httpd basic-handlers)
         (ocelotl net httpd file-directory-handlers)
@@ -39,7 +40,12 @@
            ((2) (merge-config (default-config) (read-config (cadr argv))))
            (else
             (bail-out "usage: irclog-httpd.sps [config-file]")))))
-    (irclog-httpd config)))
+    (let-logger-properties
+     ((root-logger `((threshold info)
+                     (handlers ,(lambda (entry)
+                                  (default-log-formatter entry
+                                                         (current-output-port)))))))
+     (irclog-httpd config))))
 
 (define (default-config)
   '((port 8001)
